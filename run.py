@@ -71,7 +71,13 @@ def print_menu():
     print("    ├─ [4c] Dynamic Masking Assessment")
     print("    └─ [4d] Research Roadmap\n")
     
-    print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Project Information{Colors.ENDC}")
+    print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation{Colors.ENDC}")
+    print("    ├─ [5a] Quick Evaluation")
+    print("    ├─ [5b] Long Training Pipeline")
+    print("    ├─ [5c] Parameter Sweep")
+    print("    └─ [5d] Data Augmentation\n")
+    
+    print(f"{Colors.YELLOW}[6]{Colors.ENDC} {Colors.BOLD}Project Information{Colors.ENDC}")
     print("    View project statistics and status\n")
     
     print(f"{Colors.RED}[0]{Colors.ENDC} {Colors.BOLD}Exit{Colors.ENDC}\n")
@@ -201,7 +207,19 @@ def main():
         elif choice == '4d':
             open_documentation('docs/roadmap/README.md')
         
-        elif choice == '5':
+        elif choice == '5a':
+            run_script('engine/arbiter_quick_eval.py', 'Running Quick Evaluation')
+        
+        elif choice == '5b':
+            run_script('engine/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
+        
+        elif choice == '5c':
+            run_script('engine/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
+        
+        elif choice == '5d':
+            run_script('scripts/arbiter_data_augmentor.py', 'Generating Augmented Data')
+        
+        elif choice == '6':
             show_project_info()
         
         elif choice == '0':

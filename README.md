@@ -1,50 +1,71 @@
-# Genesis: Bible-Trained Language Model for Causal Reasoning
+# Genesis Arbiter: Deep Reasoning in Data-Constrained Regimes
 
-Genesis is a research prototype exploring whether large language models trained exclusively on biblical text can develop logical reasoning capabilities through **semantic coherence** rather than **dataset scale**.
+Genesis Arbiter is an advanced research platform investigating **emergent reasoning in small language models** through corpus-specific optimization, extreme architectural depth, and extended training regimes that induce "grokking" phase transitions.
 
 ## 🎯 Project Mission
 
-Train specialized LLMs on the Bible alone to investigate:
-- Whether deep compression of coherent data enables reasoning without internet-scale corpora
-- How architectural choices (depth vs. width) affect logical abstraction
-- If special initialization of high-frequency tokens improves semantic structure learning
+**Primary Objective**: Train 2B-parameter "Deep & Narrow" transformers exclusively on the Bible (~1M tokens) to demonstrate that:
+- **Depth substitutes for volume**: 80-144 layer models can develop reasoning without trillion-token datasets
+- **Extended training induces phase transitions**: Grokking enables generalization beyond memorization
+- **Corpus-specific optimization maximizes signal**: Custom tokenizers and data augmentation extract latent structure
+
+**Research Foundation**: Based on ["Architecting Emergent Reasoning in Data-Constrained Regimes"](docs/research/Architecting_Emergent_Reasoning_in_Data-Constrained_Regimes.md)
 
 ---
 
 ## 📁 Project Structure
 
 ```
-Genesis_prototype/
-├── run.py                      # 🎮 Central menu system (START HERE!)
-├── README.md                   # Project overview
-├── CONTRIBUTING.md             # Contribution guidelines
-├── engine/                     # Core training and inference system
-│   ├── models/                 # Model architectures (Llama implementation)
-│   ├── datasets/               # Data loading and preprocessing
-│   ├── components/             # Checkpointing, optimization utilities
-│   ├── train_configs/          # Hardware-agnostic TOML configurations
-│   │   ├── high_vram.toml      # 12+ GB VRAM (Performance mode)
-│   │   └── low_vram.toml       # 4-6 GB VRAM (Compatibility mode)
-│   ├── train.py                # Main training script
-│   ├── nwt_corpus.txt          # New World Translation corpus (1M tokens)
-│   └── genesis_tokenizer.json  # BPE tokenizer with Jehovah token
+Genesis_arbiter/
+├── run.py                          # 🎮 Central menu system (START HERE!)
+├── README.md                       # Project overview
+├── CONTRIBUTING.md                 # Contribution guidelines
+│
+├── engine/                         # Core training, evaluation & automation
+│   ├── models/                     # DeepNorm transformer architectures
+│   ├── datasets/                   # Corpus loading and preprocessing
+│   ├── components/                 # Checkpointing, optimization
+│   │
+│   ├── train.py                    # Interactive training system
+│   ├── nwt_corpus.txt              # NWT corpus (1M tokens, 4.3 MB)
+│   │
+│   ├── train_configs/              # Legacy hardware-tier configs
+│   │   ├── high_vram.toml
+│   │   └── low_vram.toml
+│   │
+│   └── 🤖 ARBITER AUTOMATION (NEW - Phase 3)
+│       ├── arbiter_logger.py           # SQLite + TensorBoard logging
+│       ├── arbiter_quick_eval.py       # Fast (<1h) checkpoint evaluation
+│       ├── arbiter_sweep_orchestrator.py  # Distributed parameter sweeps
+│       └── arbiter_long_pipeline.py    # End-to-end training automation
+│
+├── scripts/                        # Utilities & data generation
+│   ├── arbiter_tokenizer_factory.py   # Multi-vocab SentencePiece training
+│   ├── arbiter_data_augmentor.py      # Synthetic reasoning traces
+│   ├── arbiter_perplexity.py          # Legacy perplexity calculator
+│   ├── friction_stress_test.py        # Adversarial evaluation
+│   └── [see scripts/README.md for full listing]
+│
+├── configs/
+│   └── sweep_templates/            # Parameter sweep configurations
+│       ├── base_config.toml
+│       ├── deep_narrow_template.toml
+│       ├── grokking_regime.toml    # Extreme weight decay config
+│       └── baseline_standard.toml
+│
 ├── docs/
-│   ├── research/               # Technical and research documentation
+│   ├── research/                   # Technical papers
+│   │   ├── Architecting_Emergent_Reasoning_in_Data-Constrained_Regimes.md
 │   │   ├── theoretical_foundations.md
-│   │   ├── dynamic_masking_assessment.md
-│   │   └── logical_refinement_strategies.md
-│   ├── reference/              # Quick reference and walkthroughs
-│   │   ├── QUICK_REFERENCE.md
-│   │   └── walkthrough1.md
-│   └── roadmap/                # Implementation planning
-│       └── README.md
-├── scripts/                    # Utility and analysis scripts
-│   ├── count_unique_words.py
-│   ├── count_logical_connectives.py
-│   ├── train_tokenizer.py
-│   ├── arbiter_perplexity.py
-│   └── friction_stress_test.py
-└── checkpoints/                # 💾 Model snapshots (Git-ignored)
+│   │   └── dynamic_masking_assessment.md
+│   ├── reference/                  # Quick guides
+│   └── roadmap/                    # Implementation plans
+│
+├── logs/                           # Auto-created by arbiter_logger
+│   ├── experiments.db              # SQLite experiment database
+│   └── tensorboard/                # TensorBoard logs
+│
+└── checkpoints/                    # Model snapshots (Git-ignored)
 ```
 
 ---
@@ -63,7 +84,8 @@ The interactive menu provides:
 - **[2] Corpus Analysis** - Word counts and logical connective analysis
 - **[3] Evaluation & Testing** - Perplexity calculation and stress tests
 - **[4] Documentation** - Open reference guides in your default viewer
-- **[5] Project Information** - View statistics and project status
+- **[5] Arbiter Automation** - Quick eval, long pipelines, parameter sweeps, data augmentation
+- **[6] Project Information** - View statistics and project status
 
 ### Advanced: Direct Training
 
@@ -88,17 +110,27 @@ torchrun --nproc_per_node=2 train.py
 
 ## 🏗️ Model Architectures
 
-| Protocol | Dimensions | Layers | Parameters | VRAM (FP16/BF16) | Purpose | Learning Rate |
-|----------|-----------|--------|-----------|------------------|---------|---------------|
-| **Microscope** | 768 | 12 | 125.5M | ~2-3 GB | Baseline comparisons | 3e-4 |
-| **Tower of Truth** | 144 | 144 | ~5-8M | ~1-2 GB | Deep logical abstraction | 1e-4 |
-| **High-Res Arbiter** | 1024 | 24 | ~180M | ~3-4 GB | Maximum semantic resolution | 2e-4 |
+### Deep & Narrow Topologies (Phase 3)
+
+| Configuration | Dim | Layers | Heads | Params | Purpose | Weight Decay |
+|--------------|-----|--------|-------|--------|---------|-------------|
+| **Theos-Small** | 1024 | 80 | 16 | ~1.8B | Grokking experiments | 0.1-0.2 |
+| **Deep Narrow (Variable)** | 768-1280 | 60-100 | 12-20 | 1-3B | Parameter sweeps | Configurable |
+| **Baseline Wide** | 2048 | 32 | 16 | ~2B | Comparison benchmark | 0.01 |
+
+### Legacy Architectures (Phase 1-2)
+
+| Protocol | Dim | Layers | Params | Purpose |
+|----------|-----|--------|--------|----------|
+| Microscope | 768 | 12 | 125M | Baseline |
+| Tower of Truth | 144 | 144 | ~8M | Extreme depth experiment |
+| High-Res Arbiter | 1024 | 24 | ~180M | Semantic resolution |
 
 ### Key Features
-- **Jehovah Token**: Special initialization for this high-frequency term (~7,000 occurrences)
-- **Multi-mode training**: Dynamic configuration injection based on selected architecture
-- **Hardware-agnostic configs**: High VRAM (12+ GB) and Low VRAM (4-6 GB) tiers
-- **Optimized training**: FSDP/DDP for distributed setups or single-node fallback
+- **DeepNorm Stabilization**: Enables training of 80-144 layer networks
+- **Custom Tokenizers**: SentencePiece BPE with corpus-specific MWE extraction
+- **Grokking Detection**: Automatic monitoring for validation loss phase transitions
+- **Distributed Training**: FSDP for 2B+ parameter models across multiple GPUs
 
 ---
 
@@ -146,17 +178,29 @@ Start here: **[Quick Reference Guide](docs/reference/QUICK_REFERENCE.md)**
 
 | Component | Status |
 |-----------|--------|
-| Core Architecture | ✅ Complete |
-| Multi-Mode System | ✅ Complete |
-| Jehovah Token Initialization | ✅ Complete |
-| Training Infrastructure | ✅ Complete |
-| Central Menu System | ✅ Complete |
+| **Phase 1: Core Architecture** | ✅ Complete |
+| Core Llama Implementation | ✅ Complete |
+| Multi-Mode Training System | ✅ Complete |
 | Hardware-Agnostic Configs | ✅ Complete |
-| GitHub Organization | ✅ Complete |
-| Logical Refinement | 🔄 In Progress (Phase 2) |
-| Evaluation Framework | 🔴 Not Started |
+| **Phase 2: Logical Refinement** | ✅ Complete |
+| Jehovah Token Initialization | ✅ Complete |
+| Dynamic Masking Research | ✅ Complete |
+| **Phase 3: Arbiter Automation** | ✅ Complete (~2,850 LOC) |
+| SQLite + TensorBoard Logger | ✅ Complete |
+| Multi-Vocab Tokenizer Factory | ✅ Complete |
+| Quick Evaluation Suite (<1h) | ✅ Complete |
+| Data Augmentation System | ✅ Complete |
+| Parameter Sweep Orchestrator | ✅ Complete |
+| Long-Form Training Pipeline | ✅ Complete |
+| Configuration Templates | ✅ Complete (4 TOML files) |
+| **Phase 4: Visualization & Analysis** | 🔴 Not Started |
+| Live Dashboard (Streamlit) | 🔴 Planned |
+| Full Theological Benchmark | 🔴 Planned |
+| Circuit Extraction Tools | 🔴 Planned |
 
-**Next Milestone**: Implement weighted masking on logical connectives (see [roadmap](docs/roadmap/README.md))
+**Current Milestone**: Phase 3 complete. Ready for large-scale grokking experiments.
+
+**Next Phase**: Implement live monitoring dashboard and comprehensive evaluation benchmarks.
 
 ---
 

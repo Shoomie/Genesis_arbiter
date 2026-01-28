@@ -1,0 +1,22 @@
+# Deep & Narrow Architecture Template
+# Prioritizes depth over width for reasoning capability
+
+[model]
+# These are template variables that will be filled by sweep orchestrator
+dim = {{DIM}}
+n_layers = {{N_LAYERS}}
+n_heads = {{N_HEADS}}
+vocab_size = {{VOCAB_SIZE}}
+
+# Feed-forward dimension (standard 4x multiplier)
+# Will be computed as 4 * dim
+
+[training]
+# Grokking-optimized hyperparameters
+weight_decay = {{WEIGHT_DECAY}}
+learning_rate = {{LEARNING_RATE}}
+warmup_steps = {{WARMUP_STEPS}}
+steps = 200000
+
+# Deep networks benefit from gradient clipping
+grad_clip = 1.0

@@ -1,14 +1,63 @@
-# Genesis Utility Scripts
+# Genesis Arbiter: Utility Scripts
 
-This folder contains utility scripts for corpus analysis, tokenizer training, and model evaluation.
+This directory contains utility scripts for corpus analysis, tokenizer training, model evaluation, and automated data augmentation for the Arbiter research infrastructure.
 
-## 📊 Corpus Analysis Scripts
+---
+
+## 🤖 ARBITER AUTOMATION (Phase 3 - NEW)
+
+### `arbiter_tokenizer_factory.py`
+**Automated multi-vocabulary tokenizer training with corpus-specific optimization.**
+
+**Features**:
+- Batch generation at 4k, 8k, 16k, 32k vocab sizes
+- Automatic MWE (multi-word entity) extraction via TF-IDF
+- Compression ratio analysis for optimal vocabulary selection
+- SentencePiece BPE integration with custom symbols
+
+**Usage**:
+```bash
+python arbiter_tokenizer_factory.py ./engine/nwt_corpus.txt
+```
+
+**Output**:
+- `./tokenizers/arbiter_nwt_4096.model`
+- `./tokenizers/arbiter_nwt_8192.model`
+- `./tokenizers/tokenizer_summary.json` (compression metrics)
+
+**Key Insight**: Forces "Jehovah God", "Jesus Christ", "Kingdom of God" as atomic tokens.
+
+---
+
+### `arbiter_data_augmentor.py`
+**Synthetic reasoning trace generation to maximize data utility in 1M-token regime.**
+
+**Augmentation Strategies**:
+1. **Q&A Pairs** (500 traces): "Jesus went to Jerusalem" → "Where did Jesus go? Jerusalem"
+2. **Cross-Reference Chains** (300 traces): Link verses A → B → C for transitive reasoning
+3. **Genealogy Reasoning** (200 traces): Extract "X fathered Y" → generate grandfather inference
+4. **Adversarial Samples** (100 traces): Theologically inconsistent statements for contrastive learning
+
+**Usage**:
+```bash
+python arbiter_data_augmentor.py --corpus ./engine/nwt_corpus.txt --output ./augmented_data.jsonl
+```
+
+**Output**:
+- `augmented_data.jsonl` (JSONL format compatible with training loops)
+- `augmented_sample.txt` (human-readable inspection file)
+
+**Research Application**: Converts 1M tokens into 1,100+ reasoning traces.
+
+---
+
+## 📊 CORPUS ANALYSIS (Legacy)
 
 ### `count_unique_words.py`
 Analyzes vocabulary diversity in the NWT corpus.
 
 **Usage**:
-```powershell
+```bash
 python count_unique_words.py
 ```
 
@@ -20,7 +69,7 @@ python count_unique_words.py
 Counts occurrences of logical connectives and transition words.
 
 **Usage**:
-```powershell
+```bash
 python count_logical_connectives.py
 ```
 
@@ -35,13 +84,13 @@ python count_logical_connectives.py
 
 ---
 
-## 🔧 Tokenizer Scripts
+## 🔧 TOKENIZER TRAINING (Legacy)
 
 ### `train_tokenizer.py`
-Trains a BPE tokenizer on the biblical corpus.
+Trains a basic BPE tokenizer on the biblical corpus (superseded by `arbiter_tokenizer_factory.py`).
 
 **Usage**:
-```powershell
+```bash
 python train_tokenizer.py
 ```
 
@@ -55,16 +104,18 @@ python train_tokenizer.py
 - `genesis_tokenizer-vocab.json`
 - `genesis_tokenizer-merges.txt`
 
+**Note**: For Phase 3 research, prefer `arbiter_tokenizer_factory.py` for multi-vocab sweeps.
+
 ---
 
-## 📈 Evaluation Scripts
+## 📈 EVALUATION SCRIPTS
 
 ### `arbiter_perplexity.py`
-Calculates perplexity on held-out biblical text.
+Calculates perplexity on held-out biblical text (legacy evaluation tool).
 
 **Usage**:
-```powershell
-python arbiter_perplexity.py --checkpoint ../engine/checkpoints_t2000/step_1000.pt
+```bash
+python arbiter_perplexity.py --checkpoint ../engine/checkpoints/step_1000.pt
 ```
 
 **Metrics**:
@@ -72,20 +123,25 @@ python arbiter_perplexity.py --checkpoint ../engine/checkpoints_t2000/step_1000.
 - Per-genre breakdown (Law, Epistles, Poetry, etc.)
 - Token-level loss distributions
 
+**Note**: For comprehensive evaluation, use `engine/arbiter_quick_eval.py` which includes:
+- Perplexity (10 min)
+- Memorization vs. Generalization (20 min)
+- Reasoning Probe (30 min)
+
 ---
 
 ### `friction_stress_test.py`
 Tests gradient flow and numerical stability during training.
 
 **Usage**:
-```powershell
+```bash
 python friction_stress_test.py
 ```
 
 **Purpose**: 
-- Detects vanishing/exploding gradients in 144-layer Tower of Truth
+- Detects vanishing/exploding gradients in 80-144 layer models
 - Measures "axiomatic friction" at logical transitions
-- Validates RMSNorm stability
+- Validates RMSNorm/DeepNorm stability
 
 **Output**: 
 - `friction_data.npy` (gradient norms per layer)
@@ -93,50 +149,89 @@ python friction_stress_test.py
 
 ---
 
-## 🔍 Running Scripts from Root
+### `test_weighted_masking.py`
+Experimental script for testing dynamic masking on logical connectives.
 
-All scripts assume execution from the `scripts/` directory:
+**Usage**:
+```bash
+python test_weighted_masking.py
+```
 
-```powershell
+**Research Context**: See [Dynamic Masking Assessment](../docs/research/dynamic_masking_assessment.md)
+
+---
+
+## 🔍 Running Scripts
+
+### From Scripts Directory
+```bash
 cd scripts
-python count_logical_connectives.py
+python arbiter_data_augmentor.py --corpus ../engine/nwt_corpus.txt
 ```
 
-If running from project root, update paths:
-```powershell
-python scripts/count_logical_connectives.py
-# May need to update internal file paths to: "../engine/nwt_corpus.txt"
+### From Project Root (via Menu)
+```bash
+python run.py
+# Select [5d] Data Augmentation
+```
+
+### From Project Root (Direct)
+```bash
+python scripts/arbiter_tokenizer_factory.py ./engine/nwt_corpus.txt
 ```
 
 ---
 
-## 📝 Adding New Scripts
+## 📝 Script Summary
 
-When creating analysis scripts:
-
-1. **Place in this folder** for organizational clarity
-2. **Use relative paths** for data files (e.g., `../engine/nwt_corpus.txt`)
-3. **Document in this README** with usage examples
-4. **Add to `.gitignore`** any generated data files (`.npy`, `.csv`, etc.)
+| Script | Purpose | Output | Phase |
+|--------|---------|--------|-------|
+| `arbiter_tokenizer_factory.py` | Multi-vocab tokenizer training | `.model` files + metrics | Phase 3 |
+| `arbiter_data_augmentor.py` | Synthetic reasoning generation | JSONL traces | Phase 3 |
+| `arbiter_perplexity.py` | Perplexity calculation | Metrics report | Phase 2 |
+| `friction_stress_test.py` | Gradient stability testing | `.npy` data | Phase 2 |
+| `count_unique_words.py` | Vocabulary analysis | Console output | Phase 1 |
+| `count_logical_connectives.py` | Connective frequency | Console output | Phase 1 |
+| `train_tokenizer.py` | Basic tokenizer (legacy) | `.json` files | Phase 1 |
+| `test_weighted_masking.py` | Masking experiments | Experimental | Phase 2 |
 
 ---
 
-## 🧪 Suggested Future Scripts
+## 🧪 Recommended Workflow
 
-- `visualize_attention.py`: Plot attention weights for key tokens (Jehovah, logical connectives)
-- `typological_benchmark.py`: Evaluate analogical reasoning (Isaac → Christ parallels)
-- `verse_completion_test.py`: Measure fill-in-the-blank accuracy
-- `genre_perplexity.py`: Compare model performance across Law, Poetry, Prophecy, etc.
-- `embedding_analysis.py`: Visualize token embeddings via t-SNE/UMAP
+For new grokking experiments:
+
+1. **Generate Custom Tokenizer**:
+   ```bash
+   python arbiter_tokenizer_factory.py ./engine/nwt_corpus.txt
+   ```
+
+2. **Create Augmented Data**:
+   ```bash
+   python arbiter_data_augmentor.py --corpus ./engine/nwt_corpus.txt
+   ```
+
+3. **Launch Training Pipeline**:
+   ```bash
+   cd ../engine
+   python arbiter_long_pipeline.py --corpus ./nwt_corpus.txt --output-dir ./run_001
+   ```
+
+4. **Monitor with Quick Eval** (during training):
+   ```bash
+   python arbiter_quick_eval.py --checkpoint ./checkpoints/step_5000 --mode all
+   ```
 
 ---
 
 ## 📖 Related Documentation
 
-- **[Research Roadmap](../docs/roadmap/README.md)**: Phase 3 evaluation framework
-- **[Dynamic Masking Assessment](../docs/research/dynamic_masking_assessment.md)**: Connective analysis context
+- **[Implementation Plan](../brain/.../implementation_plan.md)**: Full automation architecture
+- **[Walkthrough](../brain/.../walkthrough.md)**: Detailed usage examples
+- **[Research Foundation](../docs/research/Architecting_Emergent_Reasoning_in_Data-Constrained_Regimes.md)**: Theoretical basis
 - **[Quick Reference](../docs/reference/QUICK_REFERENCE.md)**: Project overview
 
 ---
 
-**Last Updated**: 2026-01-28
+**Last Updated**: 2026-01-28  
+**Current Phase**: Phase 3 Complete (Arbiter Automation)
