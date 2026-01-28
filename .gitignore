@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Model checkpoints and training artifacts
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Training logs
+logs/
+runs/
+wandb/
+tensorboard/
+*.log
+
+# Data files (keep corpus in git, but exclude generated data)
+*.npy
+*.npz
+*.pkl
+*.pickle
+friction_data.npy
+
+# Tokenizer artifacts (keep the final tokenizer, exclude intermediates)
+temp_tokenizer/
+tokenizer_cache/
+
+# Environment variables
+.env
+.env.local
+
+# System files
+Thumbs.db
+desktop.ini
+
+# Compiled translations
+*.mo
+
+# Distribution / packaging
+*.manifest
+*.spec
