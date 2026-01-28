@@ -243,9 +243,31 @@ This is **computational linguistics and AI research** investigating how language
 
 ---
 
-## 📜 License
+## 📜 Open Source Commitment
 
-*[To be determined]*
+**This is an open source research project.** We believe that information should be free, and our work is made freely available for both research and production use.
+
+### Usage Terms
+
+**Research & Production Use**: This work may be freely used, studied, modified, and built upon for both academic research and production applications.
+
+**Derivative & Commercial Works**: You may create derivative works and use this research in commercial applications (similar to how large language models are often trained on diverse corpora including copyrighted works). However, the research itself and its direct outputs **may not be directly commercialized or sold as-is**.
+
+**Our Philosophy**: We believe AI should be:
+- **Efficient**: Optimized architectures that maximize reasoning with minimal energy use
+- **Truthful**: Grounded in coherent, well-structured knowledge frameworks  
+- **Free**: Openly available to advance collective understanding
+
+### Attribution
+
+We kindly request that derivative works:
+- Acknowledge the Genesis project and its contributors
+- Credit the Watch Tower Bible & Tract Society for the New World Translation corpus
+- Share improvements and findings with the research community when possible
+
+**License**: MIT License (allows commercial derivative works while keeping the codebase open)
+
+*For questions about usage or collaboration, please open an issue on our repository.*
 
 ---
 
