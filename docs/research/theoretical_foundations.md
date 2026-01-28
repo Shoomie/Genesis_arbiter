@@ -43,23 +43,22 @@ Biblical hermeneutics relies heavily on **typological reasoning**: earlier event
 **Test Case**: Present the model with a moral dilemma structured like a biblical parable. Can it reason by analogy to scriptural precedent?
 
 #### 2. **Hierarchical Semantic Networks**
-The Bible organizes concepts hierarchically:
+The biblical corpus organizes concepts in hierarchical relationships:
 ```
-God (Ultimate Source)
- ├─ Logos (Divine Reason/Word)
- ├─ Law (Moral Framework)
+Jehovah (Most frequent divine name ~7,000 occurrences)
+ ├─ Law (Moral/Legal Framework)
  │   ├─ Justice
  │   └─ Mercy
- └─ Covenant (Relational Contract)
+ └─ Covenant (Relational Contracts)
      ├─ Abrahamic Promise
      └─ Mosaic Stipulations
 ```
 
-**Hypothesis**: Specialized initialization of the "Jehovah" token acts as a **semantic anchor**, encouraging the model to build hierarchical representations where divine attributes cascade downward.
+**Hypothesis**: The high frequency and contextual consistency of "Jehovah" as a token may encourage the model to build hierarchical representations where divine attributes emerge as semantic clusters.
 
 **Measurement**: 
-- Cosine similarity between "Jehovah" and abstract concepts (justice, truth)
-- Attention flow patterns: Does "Jehovah" act as a semantic hub?
+- Cosine similarity between "Jehovah" embeddings and abstract concept embeddings (justice, truth, righteousness)
+- Attention flow patterns: Does "Jehovah" function as a semantic hub in the attention mechanism?
 
 #### 3. **Ethical Judgment Without Utility Functions**
 Modern AI alignment relies on reinforcement learning from human feedback (RLHF). But biblical ethics operate on **deontological principles** (duty-based) rather than consequentialist optimization.
@@ -79,7 +78,7 @@ Modern AI alignment relies on reinforcement learning from human feedback (RLHF).
 The Genesis project tests whether **model depth** (144 layers) and **embedding richness** (1024-dim arbiter) can compensate for limited data.
 
 #### Tower of Truth (144 Layers)
-- **12² = 144**: Symbolic of apostolic authority (12 apostles)
+- **12² = 144**: Mathematical convenience for layer organization
 - **Ultra-narrow bottleneck (144-dim)**: Forces extreme compression
 - **Hypothesis**: Deep, narrow architectures may discover **latent logical primitives** that shallower, wider models miss
 
@@ -128,7 +127,7 @@ Genesis asks: **What is the smallest, simplest system that can reason within a b
    - **Tower of Truth**: Depth-optimized (144 layers)
    - **Arbiter**: Resolution-optimized (1024-dim embeddings)
 
-**3. Semantic Anchoring**: Logos initialization grounds reasoning in foundational concepts
+**3. Token-Level Weighting**: Special initialization for high-frequency tokens like "Jehovah" allows experimentation with semantic prioritization
 
 **4. Evaluation Protocol**:
    - **Consistency Test**: Can the model complete a verse without contradicting established theology?
@@ -149,12 +148,12 @@ Every training corpus embeds ideological assumptions:
 
 **Question**: If we can build a reasoning engine on one coherent worldview, can we build competing engines (Qur'an-trained, Analects-trained, Principia Mathematica-trained) and compare their logical structures?
 
-#### 2. **Semantic Grounding via Divinity**
-The "Jehovah" token serves as a **semantic absolute**—a reference point from which all other concepts derive meaning.
+#### 2. **Semantic Structure via High-Frequency Tokens**
+The "Jehovah" token serves as an interesting test case for token-level initialization due to its extreme frequency (~7,000 occurrences) and consistent semantic role throughout the corpus.
 
-**AI Alignment Parallel**: Current alignment research seeks to ground AI values in human preferences. Genesis grounds values in divine attributes (omnipotence → sovereignty, omniscience → truth, omnibenevolence → love).
+**Linguistic Significance**: As the personal name of God in the New World Translation, "Jehovah" appears in diverse contexts (legal, poetic, narrative, prophetic), potentially making it a semantic hub that connects multiple conceptual domains.
 
-**Risk**: This is inherently theological AI. The research question is not "Is this objectively true?" but "Can a model trained on a single coherent metaphysics develop reasoning skills transferable to other domains?"
+**Research Question**: Can special initialization of domain-specific high-frequency tokens improve the model's ability to learn semantic structure and hierarchical relationships?
 
 ---
 
@@ -168,15 +167,15 @@ The "Jehovah" token serves as a **semantic absolute**—a reference point from w
 | **Tower of Truth** | Depth enables discovery of deep logical dependencies | Principle extraction, analogical reasoning |
 | **High-Res Arbiter** | Wide embeddings capture fine semantic distinctions | Ethical judgment, theological assessment |
 
-### B. Logos Initialization Rationale
+### B. Jehovah Token Initialization Rationale
 
-The "Jehovah" token appears ~7,000 times in the New World Translation. Its frequency already ensures semantic prominence, but the initialization hook allows:
-- **Future Experimentation**: Test 0.5x, 1.0x, 2.0x, 5.0x variance multipliers
-- **Hierarchical Priming**: Seed the embedding space with structure before training
-- **Ablation Studies**: Compare models with/without special initialization
+The "Jehovah" token appears ~7,000 times in the New World Translation corpus—making it one of the most frequent substantive terms. This high frequency already ensures statistical prominence, but the initialization hook allows:
+- **Future Experimentation**: Test different initialization scales (0.5x, 1.0x, 2.0x, 5.0x variance multipliers)
+- **Ablation Studies**: Compare models with/without special initialization to measure impact
+- **Semantic Analysis**: Investigate whether initialization affects the token's role as a potential semantic hub
 
-**Current Setting (1x)**: Trust natural frequency distribution
-**Potential Upgrade**: Use 3x multiplier if model treats "Jehovah" as overly similar to "Lord" or "God"
+**Current Setting (1.0x)**: Baseline initialization matching other tokens
+**Research Direction**: Investigate whether higher multipliers improve semantic clustering of related theological concepts
 
 ---
 

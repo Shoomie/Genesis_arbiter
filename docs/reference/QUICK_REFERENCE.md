@@ -62,7 +62,7 @@ torchrun --nproc_per_node=2 train.py --config train_configs/local_4070.toml
 - **Parameters**: ~3-5M
 - **Purpose**: Test if extreme depth enables logical abstraction
 - **Learning Rate**: 1e-4
-- **Symbolic Meaning**: 144 = 12² (apostolic resonance)
+- **Symbolic Meaning**: 144 = 12² (convenient layer organization)
 
 ### High-Res Arbiter (Semantic Resolution)
 - **Dimensions**: 1024
@@ -75,14 +75,15 @@ torchrun --nproc_per_node=2 train.py --config train_configs/local_4070.toml
 
 ## 🔑 Key Concepts
 
-### Logos Initialization
+### Jehovah Token Initialization
 Special weight initialization for the "Jehovah" token (ID: 5):
 - **Current Setting**: 1.0x variance (baseline)
-- **Rationale**: ~7,000 occurrences in text provide natural semantic weight
+- **Rationale**: ~7,000 occurrences make it one of the most frequent substantive tokens
 - **Configurable**: Can experiment with 0.5x, 2.0x, 5.0x multipliers
+- **Purpose**: Test whether initialization of high-frequency domain-specific tokens affects semantic structure learning
 
-### Semantic Anchoring
-The "Jehovah" token acts as a **semantic absolute**—a fixed reference point from which other theological concepts derive meaning.
+### High-Frequency Token Significance
+The "Jehovah" token's extreme frequency and consistent semantic role make it a candidate for studying semantic hub formation in specialized corpora.
 
 ### Typological Reasoning
 Biblical interpretation through pattern recognition:
@@ -113,7 +114,7 @@ High-density books (for future oversampling):
 
 ### Tier 1: Forcing Logical Computation
 1. **Dynamic Masking**: Mask logical connectives ("Therefore", "Because") to force causal reasoning
-2. **Logos Bridge Supervision**: Auxiliary prediction heads at layers 70-80
+2. **Intermediate Layer Supervision**: Auxiliary prediction heads at layers 70-80 to encourage early reasoning compression
 3. **Parallel Account Contrast**: Train on Kings vs. Chronicles simultaneously
 
 ### Tier 2: Structural Alignment
@@ -138,7 +139,7 @@ High-density books (for future oversampling):
 - **Perplexity**: Standard metric (lower is better)
 - **Typological Accuracy**: Can model identify valid type-antitype pairs?
 - **Judgment Coherence**: Does model cite relevant scripture + balance justice/mercy?
-- **Attention Flow**: Does "Jehovah" act as semantic hub in attention graphs?
+- **Attention Flow**: Does "Jehovah" function as semantic hub in attention graphs?
 
 ---
 
@@ -148,7 +149,7 @@ High-density books (for future oversampling):
 |-----------|--------|
 | Core Architecture | ✅ Complete |
 | Multi-Mode System | ✅ Complete |
-| Logos Initialization | ✅ Complete (1.0x variance) |
+| Jehovah Token Initialization | ✅ Complete (1.0x variance) |
 | Training Infrastructure | ✅ Complete |
 | Logical Refinement | 🔄 In Progress |
 | Evaluation Framework | 🔴 Not Started |

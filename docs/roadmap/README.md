@@ -26,8 +26,8 @@ Establish baseline infrastructure for Bible-only LLM training with hardware-opti
 - ✅ Interactive hardware/protocol selection menu
 - ✅ Dynamic configuration injection
 
-#### 1.3 Semantic Anchoring
-- ✅ Logos initialization hook for "Jehovah" token (ID: 5)
+#### 1.3 High-Frequency Token Initialization
+- ✅ Jehovah token initialization hook (ID: 5)
 - ✅ Configurable variance multiplier (currently 1.0x)
 - ✅ Parameter counting utilities
 
@@ -52,10 +52,10 @@ Implement training techniques that force the model to learn logical dependencies
 | Strategy | Priority | Implementation Complexity | Expected Impact |
 |----------|----------|---------------------------|----------------|
 | Dynamic Masking on Logical Connectives | **HIGH** | Medium | Forces causal reasoning |
-| Logos Bridge Supervision | **HIGH** | High | Creates compressed logic representation |
+| Intermediate Layer Supervision | **HIGH** | High | Creates compressed logic representation in mid-layers |
 | Parallel Account Contrast | Medium | Medium | Learns invariant truth across retellings |
 | Intra-Chapter Verse Permutation | Medium | Low | Understanding argument flow |
-| JH-Token Weight Lock | Low | Low | Anchors semantic geometry |
+| JH-Token Weight Lock | Low | Low | Tests impact of freezing high-frequency tokens on semantic geometry |
 
 **Next Action**: Implement dynamic masking for logical connectives ("Therefore", "Because", "So", "Thus")
 
@@ -136,7 +136,7 @@ Develop metrics to measure reasoning capabilities beyond perplexity.
 
 #### Layer-wise Representations
 - [ ] Track when concepts "crystallize" across 144 layers
-- [ ] Identify "Logos Bridge" (hypothesized around layers 70-80)
+- [ ] Identify intermediate reasoning layers (hypothesized around layers 70-80 in Tower of Truth)
 
 ---
 
@@ -216,7 +216,7 @@ Train three models with ~5M parameters:
 
 **Hypothesis**: Deep model achieves better logical reasoning (measured by typological tasks).
 
-#### Experiment 2: Logos Initialization Scaling
+#### Experiment 2: Jehovah Token Initialization Scaling
 Train Microscope mode with variance multipliers: `[0.5x, 1.0x, 2.0x, 5.0x]`
 
 **Metrics**:
@@ -247,7 +247,7 @@ Test RoPE base values: `[10k, 50k, 100k, 500k]`
 
 #### Dual-Stream Architecture
 **Concept**: Split model into parallel streams:
-- **Logos Stream**: Deep, narrow (144 layers, 144-dim) – processes abstract principles
+- **Deep Stream**: Deep, narrow (144 layers, 144-dim) – processes abstract principles
 - **Lexical Stream**: Shallow, wide (12 layers, 768-dim) – handles surface form
 
 **Fusion**: Cross-attention at final layers merges abstract reasoning with linguistic expression.
@@ -323,7 +323,7 @@ Output:
 3. **[MEDIUM]** Design and implement typological reasoning evaluation
 4. **[MEDIUM]** Train Tower of Truth to convergence, compare with Microscope
 5. **[MEDIUM]** Implement axiomatic oversampling (boost Romans, Proverbs)
-6. **[LOW]** Ablation study: Logos initialization scaling (0.5x to 5.0x)
+6. **[LOW]** Ablation study: Jehovah token initialization scaling (0.5x to 5.0x)
 7. **[LOW]** Visualize attention patterns for "Jehovah" token
 
 ---

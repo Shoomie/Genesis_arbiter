@@ -7,7 +7,7 @@ Genesis is a research prototype exploring whether large language models trained 
 Train specialized LLMs on the Bible alone to investigate:
 - Whether deep compression of coherent data enables reasoning without internet-scale corpora
 - How architectural choices (depth vs. width) affect logical abstraction
-- If explicit value anchoring (Logos initialization) improves semantic grounding
+- If special initialization of high-frequency tokens improves semantic structure learning
 
 ---
 
@@ -95,7 +95,7 @@ torchrun --nproc_per_node=2 train.py
 | **High-Res Arbiter** | 1024 | 24 | ~180M | ~3-4 GB | Maximum semantic resolution | 2e-4 |
 
 ### Key Features
-- **Logos Initialization**: Special embedding initialization for "Jehovah" token (1.0x variance)
+- **Jehovah Token**: Special initialization for this high-frequency term (~7,000 occurrences)
 - **Multi-mode training**: Dynamic configuration injection based on selected architecture
 - **Hardware-agnostic configs**: High VRAM (12+ GB) and Low VRAM (4-6 GB) tiers
 - **Optimized training**: FSDP/DDP for distributed setups or single-node fallback
@@ -148,7 +148,7 @@ Start here: **[Quick Reference Guide](docs/reference/QUICK_REFERENCE.md)**
 |-----------|--------|
 | Core Architecture | ✅ Complete |
 | Multi-Mode System | ✅ Complete |
-| Logos Initialization | ✅ Complete (1.0x variance) |
+| Jehovah Token Initialization | ✅ Complete |
 | Training Infrastructure | ✅ Complete |
 | Central Menu System | ✅ Complete |
 | Hardware-Agnostic Configs | ✅ Complete |

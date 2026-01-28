@@ -59,8 +59,8 @@ def cleanup():
     if dist.is_initialized():
         dist.destroy_process_group()
 
-def get_logos_config(mode: str):
-    """Returns model and training hyperparameters for the selected mode."""
+def get_protocol_config(mode: str):
+    """Returns model and training hyperparameters for the selected protocol mode."""
     modes = {
         "microscope": {
             "model": {"dim": 768, "n_layers": 12, "n_heads": 12, "intermediate_size": 3072, "vocab_size": 8000},
@@ -127,7 +127,7 @@ def train():
     if selected_mode is None:
         selected_mode = "microscope"
         
-    mode_cfg = get_logos_config(selected_mode)
+    mode_cfg = get_protocol_config(selected_mode)
     if mode_cfg:
         # Override config with mode-specific values
         for k, v in mode_cfg["model"].items():
@@ -164,7 +164,7 @@ def train():
     
     # Apply Logos initialization
     if local_rank == 0:
-        print(f"[{local_rank}] Applying Logos initialization...", flush=True)
+        print(f"[{local_rank}] Applying Jehovah token initialization...", flush=True)
         jhvh_id = 5 # Default
         tokenizer = None
         try:
