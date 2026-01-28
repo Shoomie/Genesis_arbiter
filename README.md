@@ -3,7 +3,7 @@
 ## 📖 Quick Reference
 
 **What is Genesis Arbiter?**  
-An experimental AI research platform investigating whether deep, specialized language models can develop reasoning capabilities by training exclusively on a single coherent corpus (the Bible, ~1M tokens) rather than massive diverse datasets.
+An experimental AI research platform investigating whether deep, specialized language models can develop reasoning capabilities by training exclusively on a single coherent corpus (The Bible, ~1M tokens) repeated over multiple languages of high translational quality, rather than massive diverse datasets.
 
 **Core Hypothesis:**  
 *Reasoning may emerge from deep compression of a single, internally consistent logical framework rather than shallow compression of diverse, often contradictory information.*
