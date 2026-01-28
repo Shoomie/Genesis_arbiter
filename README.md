@@ -9,11 +9,11 @@ An experimental AI research platform investigating whether deep, specialized lan
 *Reasoning may emerge from deep compression of a single, internally consistent logical framework rather than shallow compression of diverse, often contradictory information.*
 
 **Key Innovation:**  
-Deep & Narrow architectures (80-144 layers, 1-2B parameters) trained to "grokking" phase transitions—the moment when models shift from memorization to true generalization.
+Deep & Narrow architectures (80-144 layers, 50M-2B parameters) trained to "grokking" phase transitions—the moment when models shift from memorization to true generalization.
 
 **Current Capabilities:**
 - ⚡ **3-4x faster training** via FlashAttention integration
-- �� **Multi-task learning** across 142 Bible translations (coherence, cross-reference, paraphrase detection)
+- �� **Multi-task learning** across 100+ Bible translations (coherence, cross-reference, paraphrase detection)
 - 🎯 **Automated grokking detection** with cross-lingual alignment monitoring
 - 🔬 **Theological concept clustering** to measure emergent semantic structure
 
