@@ -4,15 +4,25 @@ import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
-import os
 import toml
 import argparse
+from pathlib import Path
+import math
+import time
+
+# Core imports
 from models.llama.model import Llama, logos_init_hook
 from models.tokenizer import GenesisTokenizer
 from components.checkpoint import save_checkpoint
 from datasets.bible import get_bible_dataloader
-import time
-import math
+
+# Phase 3 Arbiter imports
+try:
+    from arbiter_logger import ArbiterLogger
+    ARBITER_LOGGER_AVAILABLE = True
+except ImportError:
+    ARBITER_LOGGER_AVAILABLE = False
+    print("[Warning] arbiter_logger not available - using basic logging")
 
 def setup():
     if not dist.is_initialized():
@@ -60,36 +70,137 @@ def cleanup():
         dist.destroy_process_group()
 
 def get_protocol_config(mode: str):
-    """Returns model and training hyperparameters for the selected protocol mode."""
+    """Returns model and training hyperparameters for the selected protocol mode.
+    
+    Updated for Phase 3 with Deep & Narrow architectures and DeepNorm support.
+    """
     modes = {
+        # Phase 3: Deep & Narrow Topologies
+        "theos_small": {
+            "model": {
+                "dim": 1024, 
+                "n_layers": 80, 
+                "n_heads": 16, 
+                "intermediate_size": 4096,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 3e-4,
+                "weight_decay": 0.1
+            },
+            "params": "~1.8B",
+            "purpose": "Grokking experiments with extended training"
+        },
+        "deep_narrow_60": {
+            "model": {
+                "dim": 768,
+                "n_layers": 60,
+                "n_heads": 12,
+                "intermediate_size": 3072,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 2e-4,
+                "weight_decay": 0.1
+            },
+            "params": "~1.2B",
+            "purpose": "Lighter deep architecture"
+        },
+        "deep_narrow_100": {
+            "model": {
+                "dim": 1024,
+                "n_layers": 100,
+                "n_heads": 16,
+                "intermediate_size": 4096,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 1e-4,
+                "weight_decay": 0.15
+            },
+            "params": "~2.3B",
+            "purpose": "Extreme depth for reasoning"
+        },
+        
+        # Legacy Phase 1-2 Architectures
         "microscope": {
-            "model": {"dim": 768, "n_layers": 12, "n_heads": 12, "intermediate_size": 3072, "vocab_size": 8000},
+            "model": {
+                "dim": 768, 
+                "n_layers": 12, 
+                "n_heads": 12, 
+                "intermediate_size": 3072, 
+                "vocab_size": 8000,
+                "norm_type": "rmsnorm"
+            },
             "training": {"learning_rate": 3e-4},
             "params": "125.5M",
-            "vram_fp16": "~2-3 GB",
-            "vram_bf16": "~2-3 GB"
+            "purpose": "Baseline comparisons"
         },
         "tower_of_truth": {
-            "model": {"dim": 288, "n_layers": 144, "n_heads": 12, "intermediate_size": 576, "vocab_size": 12000},
+            "model": {
+                "dim": 288, 
+                "n_layers": 144, 
+                "n_heads": 12, 
+                "intermediate_size": 576, 
+                "vocab_size": 12000,
+                "norm_type": "rmsnorm"
+            },
             "training": {"learning_rate": 1e-4},
             "params": "~5-8M",
-            "vram_fp16": "~1-2 GB",
-            "vram_bf16": "~1-2 GB"
+            "purpose": "Extreme depth experiment (legacy)"
         },
         "high_res_arbiter": {
-            "model": {"dim": 1024, "n_layers": 16, "n_heads": 16, "intermediate_size": 4096, "vocab_size": 8000},
+            "model": {
+                "dim": 1024, 
+                "n_layers": 24, 
+                "n_heads": 16, 
+                "intermediate_size": 4096, 
+                "vocab_size": 8000,
+                "norm_type": "rmsnorm"
+            },
             "training": {"learning_rate": 2e-4},
             "params": "~180M",
-            "vram_fp16": "~3-4 GB",
-            "vram_bf16": "~3-4 GB"
+            "purpose": "Semantic resolution (legacy)"
         }
     }
     return modes.get(mode.lower())
 
+def find_tokenizer(vocab_size: int = 8192):
+    """
+    Find appropriate tokenizer from arbiter_tokenizer_factory output.
+    Falls back to genesis_tokenizer.json if not found.
+    """
+    tokenizer_dir = Path("../tokenizers")
+    
+    # Try to find arbiter tokenizer matching vocab size
+    if tokenizer_dir.exists():
+        model_file = tokenizer_dir / f"arbiter_nwt_{vocab_size}.model"
+        if model_file.exists():
+            print(f"✓ Found custom tokenizer: {model_file}")
+            # For now, return None and we'll handle SentencePiece in future update
+            # Fall back to GenesisTokenizer
+    
+    # Fallback to genesis tokenizer
+    if Path("genesis_tokenizer.json").exists():
+        print(f"Using genesis_tokenizer.json (legacy)")
+        return GenesisTokenizer("genesis_tokenizer.json")
+    
+    raise FileNotFoundError("No tokenizer found. Run 'python ../scripts/arbiter_tokenizer_factory.py nwt_corpus.txt'")
+
 def train():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Genesis Arbiter Training (Single Model)")
     parser.add_argument("--config", type=str, help="Path to TOML config file (optional, will prompt if missing)")
-    parser.add_argument("--mode", type=str, choices=["microscope", "tower_of_truth", "high_res_arbiter"], help="Select model mode")
+    parser.add_argument("--mode", type=str, 
+                       choices=["theos_small", "deep_narrow_60", "deep_narrow_100", 
+                               "microscope", "tower_of_truth", "high_res_arbiter"], 
+                       help="Select model architecture")
+    parser.add_argument("--output-dir", type=str, default="./checkpoints",
+                       help="Directory for checkpoints and logs")
+    parser.add_argument("--experiment-name", type=str, default=None,
+                       help="Experiment name for logging")
     args = parser.parse_args()
     
     setup()
@@ -98,13 +209,16 @@ def train():
     # 1. Hardware Selection Menu
     selected_config_path = args.config
     if selected_config_path is None and local_rank == 0:
-        print("\n=== Genesis Hardware Configuration ===")
+        print("\n" + "="*60)
+        print("   GENESIS ARBITER TRAINING - Phase 3")
+        print("="*60)
+        print("\n=== Hardware Configuration ===")
         print("[1] High VRAM (12+ GB) - Performance Mode")
         print("[2] Low VRAM (4-6 GB) - Compatibility Mode with Gradient Checkpointing")
         h_choice = input("Select hardware tier [1-2]: ").strip()
         h_mapping = {"1": "train_configs/high_vram.toml", "2": "train_configs/low_vram.toml"}
         selected_config_path = h_mapping.get(h_choice, "train_configs/high_vram.toml")
-        print(f"Using Config: {selected_config_path}")
+        print(f"✓ Using Config: {selected_config_path}\n")
 
     # Fallback/Broadcast for other ranks (simplified)
     if selected_config_path is None:
@@ -112,28 +226,48 @@ def train():
         
     config = toml.load(selected_config_path)
     
-    # 2. Protocol Selection Menu
+    # 2. Architecture Selection Menu
     selected_mode = args.mode
     if selected_mode is None and local_rank == 0:
-        print("\n=== Genesis Protocol Selection ===")
-        print("[1] Microscope - Baseline (125M params, ~2-3GB VRAM)")
-        print("[2] Tower of Truth - Deep Compression (5-8M params, ~1-2GB VRAM, 144 Layers)")
-        print("[3] High-Res Arbiter - Maximum Resolution (180M params, ~3-4GB VRAM)")
-        m_choice = input("Select protocol [1-3]: ").strip()
-        m_mapping = {"1": "microscope", "2": "tower_of_truth", "3": "high_res_arbiter"}
-        selected_mode = m_mapping.get(m_choice, "microscope")
-        print(f"Selected Protocol: {selected_mode}\n")
-    
-    if selected_mode is None:
-        selected_mode = "microscope"
+        print("=== Architecture Selection ===")
+        print("\n--- Phase 3: Deep & Narrow Topologies ---")
+        print("[1] Theos-Small - 80L×1024D (1.8B params) - Grokking experiments")
+        print("[2] Deep Narrow 60 - 60L×768D (1.2B params) - Lighter deep model")
+        print("[3] Deep Narrow 100 - 100L×1024D (2.3B params) - Extreme depth")
+        print("\n--- Legacy Phase 1-2 Architectures ---")
+        print("[4] Microscope - 12L×768D (125M params) - Baseline")
+        print("[5] Tower of Truth - 144L×288D (8M params) - Legacy deep")
+        print("[6] High-Res Arbiter - 24L×1024D (180M params) - Legacy resolution")
         
+        m_choice = input("\nSelect architecture [1-6]: ").strip()
+        m_mapping = {
+            "1": "theos_small",
+            "2": "deep_narrow_60", 
+            "3": "deep_narrow_100",
+            "4": "microscope",
+            "5": "tower_of_truth",
+            "6": "high_res_arbiter"
+        }
+        selected_mode = m_mapping.get(m_choice, "theos_small")
+        
+    if selected_mode is None:
+        selected_mode = "theos_small"
+    
     mode_cfg = get_protocol_config(selected_mode)
-    if mode_cfg:
-        # Override config with mode-specific values
-        for k, v in mode_cfg["model"].items():
-            config["model"][k] = v
-        for k, v in mode_cfg["training"].items():
-            config["training"][k] = v
+    if not mode_cfg:
+        raise ValueError(f"Unknown mode: {selected_mode}")
+    
+    # Override config with mode-specific values
+    for k, v in mode_cfg["model"].items():
+        config["model"][k] = v
+    for k, v in mode_cfg["training"].items():
+        config["training"][k] = v
+    
+    if local_rank == 0:
+        print(f"\n✓ Selected: {selected_mode.upper()}")
+        print(f"  Parameters: {mode_cfg['params']}")
+        print(f"  Purpose: {mode_cfg['purpose']}")
+        print(f"  Norm Type: {mode_cfg['model']['norm_type']}")
 
     # Safety: Auto-correct dim % n_heads == 0
     dim = config["model"]["dim"]
@@ -143,79 +277,137 @@ def train():
         dim = (dim // n_heads + 1) * n_heads
         config["model"]["dim"] = dim
         if local_rank == 0:
-            print(f"Safety Auto-Correct: Adjusting dim from {old_dim} to {dim} to align with {n_heads} heads.")
+            print(f"⚠ Safety Auto-Correct: Adjusting dim from {old_dim} to {dim} to align with {n_heads} heads.")
 
+    # 3. Initialize Arbiter Logger
+    logger = None
+    if ARBITER_LOGGER_AVAILABLE and local_rank == 0:
+        experiment_name = args.experiment_name or f"{selected_mode}_{int(time.time())}"
+        log_dir = Path(args.output_dir) / "logs"
+        
+        try:
+            logger = ArbiterLogger(
+                log_dir=str(log_dir),
+                experiment_name=experiment_name,
+                enable_tensorboard=True
+            )
+            
+            # Start experiment
+            run_id = logger.start_experiment(config)
+            print(f"\n✓ Arbiter Logger initialized")
+            print(f"  Experiment: {experiment_name}")
+            print(f"  Run ID: {run_id}")
+            print(f"  TensorBoard: tensorboard --logdir {log_dir / 'tensorboard'}")
+        except Exception as e:
+            print(f"⚠ Warning: Failed to initialize Arbiter Logger: {e}")
+            logger = None
+
+    # 4. Device Setup
     device = torch.device(f"cuda:{local_rank}") if torch.cuda.is_available() else torch.device("cpu")
     print(f"[{local_rank}] Using device: {device}", flush=True)
     
-    print(f"[{local_rank}] Initializing {selected_mode.upper()} mode...", flush=True)
+    # 5. Initialize Model
+    print(f"[{local_rank}] Initializing {selected_mode.upper()} with {mode_cfg['model']['norm_type']} normalization...", flush=True)
     model_cfg = config["model"]
+    
     model = Llama(
         vocab_size=model_cfg["vocab_size"],
         n_layers=model_cfg["n_layers"],
         dim=model_cfg["dim"],
         n_heads=model_cfg["n_heads"],
         intermediate_size=model_cfg["intermediate_size"],
-        max_seq_len=model_cfg["max_seq_len"]
+        max_seq_len=model_cfg["max_seq_len"],
+        norm_type=model_cfg.get("norm_type", "rmsnorm")  # DeepNorm or RMSNorm
     ).to(device)
     
     if local_rank == 0:
-        print(f"[{local_rank}] Total Parameters: {model.get_num_params():,}")
+        print(f"✓ Model initialized: {model.get_num_params():,} parameters")
     
-    # Apply Logos initialization
+    # 6. Apply Jehovah Token Initialization
     if local_rank == 0:
-        print(f"[{local_rank}] Applying Jehovah token initialization...", flush=True)
+        print(f"\n[Logos Initialization] Loading tokenizer...", flush=True)
         jhvh_id = 5 # Default
         tokenizer = None
-        try:
-            tokenizer = GenesisTokenizer("genesis_tokenizer.json")
-            jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
-            print(f"[{local_rank}] Found Jehovah token ID: {jhvh_id}", flush=True)
-        except Exception as e:
-            print(f"[{local_rank}] Warning: Could not load tokenizer: {e}")
         
-        # User requested 1x multiplier for now
+        try:
+            tokenizer = find_tokenizer(model_cfg["vocab_size"])
+            if hasattr(tokenizer, 'tokenizer'):
+                jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
+                print(f"✓ Found 'Jehovah' token ID: {jhvh_id}", flush=True)
+        except Exception as e:
+            print(f"⚠ Warning: Tokenizer error: {e}")
+            try:
+                tokenizer = GenesisTokenizer("genesis_tokenizer.json")
+                jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
+            except:
+                print(f"⚠ Using default Jehovah ID: {jhvh_id}")
+        
+        # Apply initialization (1x multiplier)
         logos_init_hook(model, jehovah_token_id=jhvh_id, multiplier=1.0)
+        print(f"✓ Jehovah token initialization applied (ID={jhvh_id}, multiplier=1.0)")
     
-    # Enable torch.compile if requested
+    # 7. Compilation
     if config["training"].get("compile", False):
         if local_rank == 0:
-            print(">>> Initiating torch.compile... (This can take 2-5 minutes on the first run)", flush=True)
+            print("\n>>> Initiating torch.compile... (This can take 2-5 minutes on the first run)", flush=True)
         model = torch.compile(model)
         if local_rank == 0:
             print(">>> Model compilation complete.", flush=True)
         
-    # Parallelism setup
+    # 8. Parallelism setup
     if dist.is_initialized():
         if config["parallelism"].get("fsdp", False):
             from torch.distributed.fsdp import ShardingStrategy
             model = FSDP(model, sharding_strategy=ShardingStrategy.FULL_SHARD)
+            if local_rank == 0:
+                print("✓ FSDP enabled (Full Shard)")
         else:
             model = DDP(model, device_ids=[local_rank])
+            if local_rank == 0:
+                print("✓ DDP enabled")
     else:
         if local_rank == 0:
-            print("Parallelism: Running in pure Local mode (No FSDP/DDP overhead)", flush=True)
+            print("✓ Local training mode (no distributed overhead)")
     
-    # Gradient Checkpointing
+    # 9. Gradient Checkpointing
     if config["training"].get("gradient_checkpointing", False):
         model.gradient_checkpointing_enable()
+        if local_rank == 0:
+            print("✓ Gradient checkpointing enabled")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["training"]["learning_rate"])
+    # 10. Optimizer with weight decay
+    weight_decay = config["training"].get("weight_decay", 0.01)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=config["training"]["learning_rate"],
+        weight_decay=weight_decay
+    )
     
-    # Cosine schedule
+    if local_rank == 0:
+        print(f"\n✓ Optimizer: AdamW (LR={config['training']['learning_rate']:.2e}, WD={weight_decay})")
+    
+    # 11. Learning Rate Schedule
     total_steps = config["training"]["steps"]
     warmup_steps = config["training"].get("warmup_steps", 100)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda s: min(1.0, s/warmup_steps) * 0.5 * (1.0 + math.cos(math.pi * max(0, s-warmup_steps)/(total_steps-warmup_steps))))
     
-    # Data loading - Dynamic dataset selection based on masking config
+    def lr_lambda(s):
+        if s < warmup_steps:
+            return s / warmup_steps
+        else:
+            progress = (s - warmup_steps) / (total_steps - warmup_steps)
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    
+    # 12. Data loading
     masking_config = config.get("masking", {})
     masking_enabled = masking_config.get("enabled", False)
     
     if masking_enabled:
         from datasets.bible_weighted_masking import get_bible_weighted_dataloader
         if local_rank == 0:
-            print(f"[{local_rank}] ✨ Using WEIGHTED MASKING strategy", flush=True)
-            print(f"[{local_rank}]    Base probability: {masking_config.get('base_probability', 0.4)}", flush=True)
+            print(f"\n✓ Using WEIGHTED MASKING strategy", flush=True)
+            print(f"  Base probability: {masking_config.get('base_probability', 0.4)}", flush=True)
         
         dataloader = get_bible_weighted_dataloader(
             corpus_path="nwt_corpus.txt",
@@ -228,7 +420,7 @@ def train():
         )
     else:
         if local_rank == 0:
-            print(f"[{local_rank}] Using standard dataset (no masking)", flush=True)
+            print(f"\n✓ Standard dataset (no special masking)")
         
         dataloader = get_bible_dataloader(
             corpus_path="nwt_corpus.txt",
@@ -237,11 +429,21 @@ def train():
             max_seq_len=model_cfg["max_seq_len"]
         )
 
+    # 13. Training Loop
+    print(f"\n{'='*60}")
+    print(f"  TRAINING START")
+    print(f"{'='*60}")
+    print(f"  Total steps: {total_steps}")
+    print(f"  Checkpoint interval: {config['checkpoint']['interval']}")
+    print(f"  Log interval: {config.get('logging', {}).get('log_interval', 10)}")
+    print(f"{'='*60}\n")
     
-    print(f"[{local_rank}] Starting training loop...", flush=True)
     step = 0
+    epoch = 0
     done = False
+    
     while not done:
+        epoch += 1
         for tokens, labels in dataloader:
             step += 1
             if step > total_steps:
@@ -252,19 +454,63 @@ def train():
             optimizer.zero_grad()
             
             autocast_dtype = torch.bfloat16 if config["training"]["precision"] == "bf16" else torch.float16
-            with torch.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type != "cpu"), dtype=autocast_dtype):
+            with torch.autocast(device_type="cuda" if device.type == "cuda" else "cpu", 
+                              enabled=(device.type != "cpu"), 
+                              dtype=autocast_dtype):
                 logits, loss = model(tokens, labels)
             
             loss.backward()
+            
+            # Gradient clipping (important for deep networks)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), 
+                config["training"].get("grad_clip", 1.0)
+            )
+            
             optimizer.step()
             scheduler.step()
             
-            if step % 10 == 0 and local_rank == 0:
-                print(f"Step {step}/{total_steps}: Loss = {loss.item():.4f}, LR = {optimizer.param_groups[0]['lr']:.2e}", flush=True)
+            # Logging
+            log_interval = config.get("logging", {}).get("log_interval", 10)
+            if step % log_interval == 0 and local_rank == 0:
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"[Epoch {epoch}] Step {step}/{total_steps}: Loss={loss.item():.4f}, LR={current_lr:.2e}, GradNorm={grad_norm:.3f}", flush=True)
                 
+                # Log to Arbiter Logger
+                if logger:
+                    logger.log_training_step(
+                        step=step,
+                        loss=loss.item(),
+                        grad_norm=grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm,
+                        learning_rate=current_lr
+                    )
+            
+            # Checkpointing
             if step % config["checkpoint"]["interval"] == 0 and local_rank == 0:
-                save_checkpoint(model.module if hasattr(model, "module") else model, optimizer, step, config["checkpoint"]["dir"])
+                checkpoint_dir = Path(args.output_dir) / "checkpoints"
+                save_checkpoint(
+                    model.module if hasattr(model, "module") else model, 
+                    optimizer, 
+                    step, 
+                    str(checkpoint_dir)
+                )
+                print(f"✓ Checkpoint saved: step_{step}")
 
+    # 14. Finalization
+    if logger and local_rank == 0:
+        logger.finalize_experiment(
+            final_train_loss=loss.item(),
+            final_val_loss=None,  # Would need validation set
+            status="completed"
+        )
+        print(f"\n✓ Experiment finalized in logger")
+    
+    print(f"\n{'='*60}")
+    print(f"  TRAINING COMPLETE")
+    print(f"  Final loss: {loss.item():.4f}")
+    print(f"  Total steps: {step}")
+    print(f"{'='*60}\n")
+    
     cleanup()
 
 if __name__ == "__main__":

@@ -17,6 +17,24 @@ class RMSNorm(nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
+class DeepNorm(nn.Module):
+    """DeepNorm from 'DeepNet: Scaling Transformers to 1000 Layers'
+    
+    For deep networks (80-144 layers), DeepNorm provides better gradient flow
+    by combining residual scaling with LayerNorm.
+    
+    Formula: DeepNorm(x, residual) = LayerNorm(alpha * x + residual)
+    where alpha = (2 * N)^0.25 and N is the number of layers.
+    """
+    def __init__(self, dim: int, n_layers: int, eps: float = 1e-5):
+        super().__init__()
+        self.alpha = (2 * n_layers) ** 0.25
+        self.norm = nn.LayerNorm(dim, eps=eps)
+    
+    def forward(self, x, residual):
+        """Apply DeepNorm: LayerNorm(alpha * x + residual)"""
+        return self.norm(self.alpha * x + residual)
+
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     t = torch.arange(end, device=freqs.device)
@@ -79,28 +97,50 @@ class FeedForward(nn.Module):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
 class TransformerBlock(nn.Module):
-    def __init__(self, layer_id, dim, n_heads, intermediate_size):
+    def __init__(self, layer_id, dim, n_heads, intermediate_size, norm_type="rmsnorm", n_layers=None):
         super().__init__()
         self.layer_id = layer_id
+        self.norm_type = norm_type
         self.attention = Attention(dim, n_heads)
         self.feed_forward = FeedForward(dim, intermediate_size)
-        self.attention_norm = RMSNorm(dim)
-        self.ffn_norm = RMSNorm(dim)
+        
+        # Select normalization type
+        if norm_type == "deepnorm":
+            assert n_layers is not None, "n_layers required for DeepNorm"
+            self.attention_norm = DeepNorm(dim, n_layers)
+            self.ffn_norm = DeepNorm(dim, n_layers)
+        else:  # rmsnorm (default)
+            self.attention_norm = RMSNorm(dim)
+            self.ffn_norm = RMSNorm(dim)
 
     def forward(self, x, freqs_cis):
-        h = x + self.attention(self.attention_norm(x), freqs_cis)
-        out = h + self.feed_forward(self.ffn_norm(h))
+        if self.norm_type == "deepnorm":
+            # DeepNorm: norm(alpha * residual + branch_output)
+            attn_out = self.attention(x, freqs_cis)
+            h = self.attention_norm(x, attn_out)  # x is residual, attn_out is branch
+            
+            ffn_out = self.feed_forward(h)
+            out = self.ffn_norm(h, ffn_out)
+        else:  # rmsnorm (standard post-norm)
+            h = x + self.attention(self.attention_norm(x), freqs_cis)
+            out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
 class Llama(nn.Module):
-    def __init__(self, vocab_size=8000, n_layers=12, dim=768, n_heads=12, intermediate_size=3072, max_seq_len=1024):
+    def __init__(self, vocab_size=8000, n_layers=12, dim=768, n_heads=12, 
+                 intermediate_size=3072, max_seq_len=1024, norm_type="rmsnorm"):
         super().__init__()
         self.vocab_size = vocab_size
+        self.n_layers = n_layers
+        self.norm_type = norm_type
+        
         self.tok_embeddings = nn.Embedding(vocab_size, dim)
         self.layers = nn.ModuleList([
-            TransformerBlock(i, dim, n_heads, intermediate_size)
+            TransformerBlock(i, dim, n_heads, intermediate_size, norm_type, n_layers)
             for i in range(n_layers)
         ])
+        
+        # Final norm (always RMSNorm, even for DeepNorm models)
         self.norm = RMSNorm(dim)
         self.output = nn.Linear(dim, vocab_size, bias=False)
         self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2)
