@@ -248,12 +248,12 @@ Confucian Arbiter: "Depends on hierarchy—reporting to external authority disru
 
 ## Conclusion
 
-The Genesis project is not an attempt to create "Christian AI" but rather an **experimental probe** into the relationship between:
+The Genesis project represents an **experimental investigation** into the relationship between:
 - **Data diversity** vs. **data coherence**
 - **Parameter scale** vs. **architectural depth**
 - **General intelligence** vs. **domain expertise**
 
-If a model trained solely on ~1M tokens of theology can reason within that domain, it challenges the assumption that AGI requires internet-scale data. It suggests that **specialized, deeply compressed intelligence** may be a viable path alongside generalist scaling.
+By training on ~1M tokens of biblically coherent text, this research tests whether specialized, deeply compressed intelligence can emerge from internally consistent corpora. The findings will contribute to our understanding of how AI systems learn reasoning from structured knowledge frameworks.
 
 Ultimately, Genesis asks:
 

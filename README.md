@@ -195,6 +195,27 @@ Start here: **[Quick Reference Guide](docs/reference/QUICK_REFERENCE.md)**
 
 ---
 
+## 🙏 Acknowledgments
+
+### Primary Corpus
+
+This research utilizes the **New World Translation of the Holy Scriptures** published by the **Watch Tower Bible & Tract Society**. We extend sincere gratitude and appreciation to the Watch Tower organization and its devoted community of translators, scholars, and volunteers for their exceptional work.
+
+**Why We Chose the NWT:**
+- **Translation Excellence**: Decades of meticulous scholarship by biblical language experts
+- **Linguistic Consistency**: Careful, uniform rendering of key terms throughout the text
+- **Divine Name Restoration**: Principled use of "Jehovah" (7,000+ occurrences) provides a valuable lexical anchor for semantic analysis
+- **Modern Clarity**: Contemporary English that maintains fidelity to source languages
+- **Scholarly Rigor**: Multiple revisions (1950, 1961, 1984, 2013) demonstrating commitment to accuracy
+
+The NWT's interpretational coherence and scholarly foundation make it an ideal corpus for investigating whether AI models can develop reasoning from internally consistent textual frameworks.
+
+**Research Ethics**: We acknowledge that the NWT was created for religious education and spiritual instruction. Our computational research use represents a transformative application undertaken with deep respect for the spiritual significance of these texts and the community they serve. The NWT was selected for its exceptional methodological qualities: translation consistency, scholarly rigor, and interpretational coherence.
+
+**See Also**: [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for our complete formal acknowledgment and commitment to responsible use.
+
+---
+
 ## 🤝 Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for detailed guidelines on:
@@ -212,13 +233,13 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for detailed guidelines on:
 
 ---
 
-## ⚠️ Disclaimer
+## ⚠️ Research Scope
 
-This is **AI research**, not an attempt to create "Christian AI." The Bible was chosen for its:
-- Internal logical consistency
-- Historical influence on Western reasoning
-- Rich genre diversity within a unified framework
-- Manageable corpus size (~1M tokens)
+This is **computational linguistics and AI research** investigating how language models learn from coherent textual corpora. The Bible was chosen as the primary corpus for its:
+- Internal logical consistency and unified interpretational framework
+- Historical influence on Western reasoning and philosophical thought
+- Rich genre diversity (law, poetry, narrative, prophecy, wisdom, epistles)
+- Manageable corpus size (~1M tokens) enabling deep analysis
 
 ---
 
@@ -241,3 +262,4 @@ This is **AI research**, not an attempt to create "Christian AI." The Bible was 
 - 🔬 **[Research Docs](docs/research/)** - Technical deep dives
 - 🗺️ **[Roadmap](docs/roadmap/README.md)** - Implementation plan
 - 🤝 **[Contributing](CONTRIBUTING.md)** - Contribution guidelines
+- 🙏 **[Acknowledgments](ACKNOWLEDGMENTS.md)** - Corpus attribution and thanks
