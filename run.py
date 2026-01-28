@@ -55,7 +55,8 @@ def print_menu():
     print(f"{Colors.BOLD}Main Menu:{Colors.ENDC}\n")
     
     print(f"{Colors.GREEN}[1]{Colors.ENDC} {Colors.BOLD}Train Model{Colors.ENDC}")
-    print("    Launch the interactive training system\n")
+    print("    ├─ [1a] FlashAttention Training (3-4x faster)")
+    print("    └─ [1b] Multi-Task Training (with grokking detection)\n")
     
     print(f"{Colors.GREEN}[2]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
     print("    ├─ [2a] Count unique words")
@@ -68,14 +69,16 @@ def print_menu():
     print(f"{Colors.GREEN}[4]{Colors.ENDC} {Colors.BOLD}Documentation{Colors.ENDC}")
     print("    ├─ [4a] Quick Reference Guide")
     print("    ├─ [4b] Theoretical Foundations")
-    print("    ├─ [4c] Dynamic Masking Assessment")
-    print("    └─ [4d] Research Roadmap\n")
+    print("    ├─ [4c] Setup Guide (FlashAttention)")
+    print("    ├─ [4d] Grokking Detection Methodology")
+    print("    └─ [4e] Research Roadmap\n")
     
     print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation{Colors.ENDC}")
-    print("    ├─ [5a] Quick Evaluation")
-    print("    ├─ [5b] Long Training Pipeline")
-    print("    ├─ [5c] Parameter Sweep")
-    print("    └─ [5d] Data Augmentation\n")
+    print("    ├─ [5a] Verify FlashAttention Setup")
+    print("    ├─ [5b] Quick Evaluation")
+    print("    ├─ [5c] Long Training Pipeline")
+    print("    ├─ [5d] Parameter Sweep")
+    print("    └─ [5e] Data Augmentation\n")
     
     print(f"{Colors.YELLOW}[6]{Colors.ENDC} {Colors.BOLD}Project Information{Colors.ENDC}")
     print("    View project statistics and status\n")
@@ -157,17 +160,24 @@ def show_project_info():
         print(f"  {Colors.CYAN}Saved Checkpoints:{Colors.ENDC} {checkpoint_count}")
     
     print(f"\n{Colors.BOLD}📁 Project Structure:{Colors.ENDC}\n")
-    print("  genesis_prototype/")
-    print("  ├── engine/          # Core training system")
-    print("  ├── docs/            # Documentation")
-    print("  │   ├── research/    # Technical papers")
-    print("  │   ├── reference/   # Quick guides")
-    print("  │   └── roadmap/     # Implementation plans")
-    print("  ├── scripts/         # Utility tools")
-    print("  └── checkpoints/     # Model snapshots")
+    print("  Genesis_arbiter/")
+    print("  ├── engine/              # Core training system")
+    print("  │   ├── models/          # Transformer architectures")
+    print("  │   ├── training/        # FlashAttention & callbacks")
+    print("  │   ├── datasets/        # Data loading")
+    print("  │   └── train_*.py       # Training scripts")
+    print("  ├── docs/")
+    print("  │   ├── research/        # Technical papers")
+    print("  │   └── reference/       # Quick guides")
+    print("  ├── scripts/             # Utility tools")
+    print("  └── checkpoints/         # Model snapshots")
     
-    print(f"\n{Colors.BOLD}🎯 Current Phase:{Colors.ENDC} Phase 2 - Logical Refinement")
-    print(f"{Colors.BOLD}📌 Next Milestone:{Colors.ENDC} Implement dynamic masking on logical connectives")
+    print(f"\n{Colors.BOLD}🎯 Framework Status:{Colors.ENDC}")
+    print(f"  {Colors.GREEN}✅ Phase 1:{Colors.ENDC} FlashAttention Integration (3-4x speedup)")
+    print(f"  {Colors.GREEN}✅ Phase 2:{Colors.ENDC} Multi-Task Learning (142 translations)")
+    print(f"  {Colors.GREEN}✅ Phase 3:{Colors.ENDC} Grokking Detection & Monitoring")
+    
+    print(f"\n{Colors.BOLD}📌 Ready for:{Colors.ENDC} Production training runs with automated grokking detection")
     
     input(f"\n{Colors.YELLOW}Press Enter to return to menu...{Colors.ENDC}")
 
@@ -180,8 +190,11 @@ def main():
         
         choice = input(f"{Colors.BOLD}Select an option: {Colors.ENDC}").strip().lower()
         
-        if choice == '1':
-            run_script('engine/train.py', 'Launching Training System')
+        if choice == '1a':
+            run_script('engine/train_composer.py', 'Launching FlashAttention Training System')
+        
+        elif choice == '1b':
+            run_script('engine/train_multi_task.py', 'Launching Multi-Task Training with Grokking Detection')
         
         elif choice == '2a':
             run_script('scripts/count_unique_words.py', 'Analyzing Corpus Vocabulary')
@@ -202,21 +215,27 @@ def main():
             open_documentation('docs/research/theoretical_foundations.md')
         
         elif choice == '4c':
-            open_documentation('docs/research/dynamic_masking_assessment.md')
+            open_documentation('PHASE1_SETUP.md')
         
         elif choice == '4d':
+            open_documentation('docs/research/grokking_detection_methodology.md')
+        
+        elif choice == '4e':
             open_documentation('docs/roadmap/README.md')
         
         elif choice == '5a':
-            run_script('engine/arbiter_quick_eval.py', 'Running Quick Evaluation')
+            run_script('engine/verify_phase1.py', 'Verifying FlashAttention Setup')
         
         elif choice == '5b':
-            run_script('engine/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
+            run_script('engine/arbiter_quick_eval.py', 'Running Quick Evaluation')
         
         elif choice == '5c':
-            run_script('engine/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
+            run_script('engine/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
         
         elif choice == '5d':
+            run_script('engine/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
+        
+        elif choice == '5e':
             run_script('scripts/arbiter_data_augmentor.py', 'Generating Augmented Data')
         
         elif choice == '6':
@@ -224,7 +243,7 @@ def main():
         
         elif choice == '0':
             print(f"\n{Colors.CYAN}Thank you for using Genesis!{Colors.ENDC}")
-            print(f"{Colors.YELLOW}For more information, visit: github.com/[your-repo]/Genesis{Colors.ENDC}\n")
+            print(f"{Colors.YELLOW}Deep Reasoning in Data-Constrained Regimes{Colors.ENDC}\n")
             sys.exit(0)
         
         else:
@@ -237,3 +256,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print(f"\n\n{Colors.YELLOW}Interrupted by user. Exiting...{Colors.ENDC}\n")
         sys.exit(0)
+

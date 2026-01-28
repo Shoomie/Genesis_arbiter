@@ -1,0 +1,30 @@
+# Genesis Arbiter - Composer Framework Dependencies
+
+# Core PyTorch and ML
+torch>=2.0.0
+torchvision
+torchaudio
+
+# Composer framework for training orchestration
+mosaicml>=0.17.0
+
+# FlashAttention for 2-4x speedup
+# Note: This requires CUDA 11.8+ and may take 10-15 minutes to build
+flash-attn>=2.0.0
+
+# Existing dependencies
+tokenizers>=0.13.0
+sentencepiece>=0.1.99
+toml>=0.10.2
+lxml>=4.9.0
+
+# Logging and monitoring
+tensorboard>=2.13.0
+wandb  # Optional, for WandB integration
+
+# Data processing
+numpy>=1.24.0
+requests>=2.31.0
+
+# Optional: For advanced distributed training
+# fairscale  # For additional FSDP features

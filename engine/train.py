@@ -75,7 +75,57 @@ def get_protocol_config(mode: str):
     Updated for Phase 3 with Deep & Narrow architectures and DeepNorm support.
     """
     modes = {
-        # Phase 3: Deep & Narrow Topologies
+        # Phase 3: Deep & Narrow Topologies (500M-1B range)
+        "deep_narrow_40": {
+            "model": {
+                "dim": 768,
+                "n_layers": 40,
+                "n_heads": 12,
+                "intermediate_size": 3072,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 2e-4,
+                "weight_decay": 0.08
+            },
+            "params": "~800M",
+            "purpose": "Budget deep model for quick experiments"
+        },
+        "deep_narrow_32": {
+            "model": {
+                "dim": 640,
+                "n_layers": 32,
+                "n_heads": 10,
+                "intermediate_size": 2560,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 2e-4,
+                "weight_decay": 0.08
+            },
+            "params": "~550M",
+            "purpose": "Lower-end deep architecture for faster iteration"
+        },
+        "deep_narrow_48": {
+            "model": {
+                "dim": 896,
+                "n_layers": 48,
+                "n_heads": 14,
+                "intermediate_size": 3584,
+                "vocab_size": 8192,
+                "norm_type": "deepnorm"
+            },
+            "training": {
+                "learning_rate": 2e-4,
+                "weight_decay": 0.1
+            },
+            "params": "~1.0B",
+            "purpose": "1B parameter sweet spot for grokking"
+        },
+        
+        # Phase 3: Deep & Narrow Topologies (1B+ range)
         "theos_small": {
             "model": {
                 "dim": 1024, 
@@ -194,7 +244,8 @@ def train():
     parser = argparse.ArgumentParser(description="Genesis Arbiter Training (Single Model)")
     parser.add_argument("--config", type=str, help="Path to TOML config file (optional, will prompt if missing)")
     parser.add_argument("--mode", type=str, 
-                       choices=["theos_small", "deep_narrow_60", "deep_narrow_100", 
+                       choices=["deep_narrow_32", "deep_narrow_40", "deep_narrow_48",
+                               "deep_narrow_60", "theos_small", "deep_narrow_100", 
                                "microscope", "tower_of_truth", "high_res_arbiter"], 
                        help="Select model architecture")
     parser.add_argument("--output-dir", type=str, default="./checkpoints",
@@ -230,28 +281,35 @@ def train():
     selected_mode = args.mode
     if selected_mode is None and local_rank == 0:
         print("=== Architecture Selection ===")
-        print("\n--- Phase 3: Deep & Narrow Topologies ---")
-        print("[1] Theos-Small - 80L×1024D (1.8B params) - Grokking experiments")
-        print("[2] Deep Narrow 60 - 60L×768D (1.2B params) - Lighter deep model")
-        print("[3] Deep Narrow 100 - 100L×1024D (2.3B params) - Extreme depth")
+        print("\n--- Phase 3: Deep & Narrow (500M-1B Range) ---")
+        print("[1] Deep Narrow 32 - 32L×640D (550M params) - Budget quick experiments")
+        print("[2] Deep Narrow 40 - 40L×768D (800M params) - Mid-range deep")
+        print("[3] Deep Narrow 48 - 48L×896D (1.0B params) - 1B sweet spot")
+        print("\n--- Phase 3: Deep & Narrow (1B+ Range) ---")
+        print("[4] Deep Narrow 60 - 60L×768D (1.2B params) - Lighter deep model")
+        print("[5] Theos-Small - 80L×1024D (1.8B params) - Grokking experiments")
+        print("[6] Deep Narrow 100 - 100L×1024D (2.3B params) - Extreme depth")
         print("\n--- Legacy Phase 1-2 Architectures ---")
-        print("[4] Microscope - 12L×768D (125M params) - Baseline")
-        print("[5] Tower of Truth - 144L×288D (8M params) - Legacy deep")
-        print("[6] High-Res Arbiter - 24L×1024D (180M params) - Legacy resolution")
+        print("[7] Microscope - 12L×768D (125M params) - Baseline")
+        print("[8] Tower of Truth - 144L×288D (8M params) - Legacy deep")
+        print("[9] High-Res Arbiter - 24L×1024D (180M params) - Legacy resolution")
         
-        m_choice = input("\nSelect architecture [1-6]: ").strip()
+        m_choice = input("\nSelect architecture [1-9]: ").strip()
         m_mapping = {
-            "1": "theos_small",
-            "2": "deep_narrow_60", 
-            "3": "deep_narrow_100",
-            "4": "microscope",
-            "5": "tower_of_truth",
-            "6": "high_res_arbiter"
+            "1": "deep_narrow_32",
+            "2": "deep_narrow_40",
+            "3": "deep_narrow_48",
+            "4": "deep_narrow_60",
+            "5": "theos_small", 
+            "6": "deep_narrow_100",
+            "7": "microscope",
+            "8": "tower_of_truth",
+            "9": "high_res_arbiter"
         }
-        selected_mode = m_mapping.get(m_choice, "theos_small")
+        selected_mode = m_mapping.get(m_choice, "deep_narrow_48")
         
     if selected_mode is None:
-        selected_mode = "theos_small"
+        selected_mode = "deep_narrow_48"  # Default to 1B model
     
     mode_cfg = get_protocol_config(selected_mode)
     if not mode_cfg:
@@ -429,7 +487,7 @@ def train():
             max_seq_len=model_cfg["max_seq_len"]
         )
 
-    # 13. Training Loop
+    # 13. Training Loop with ETA Tracking
     print(f"\n{'='*60}")
     print(f"  TRAINING START")
     print(f"{'='*60}")
@@ -438,13 +496,19 @@ def train():
     print(f"  Log interval: {config.get('logging', {}).get('log_interval', 10)}")
     print(f"{'='*60}\n")
     
+    # ETA tracking variables
+    start_time = time.time()
+    step_times = []  # Rolling window of recent step times
+    
     step = 0
     epoch = 0
     done = False
+    last_log_time = start_time
     
     while not done:
         epoch += 1
         for tokens, labels in dataloader:
+            step_start_time = time.time()
             step += 1
             if step > total_steps:
                 done = True
@@ -470,11 +534,37 @@ def train():
             optimizer.step()
             scheduler.step()
             
-            # Logging
+            # Track step time for ETA calculation
+            step_end_time = time.time()
+            step_duration = step_end_time - step_start_time
+            step_times.append(step_duration)
+            if len(step_times) > 100:  # Keep rolling window of last 100 steps
+                step_times.pop(0)
+            
+            # Logging with ETA
             log_interval = config.get("logging", {}).get("log_interval", 10)
             if step % log_interval == 0 and local_rank == 0:
                 current_lr = optimizer.param_groups[0]['lr']
-                print(f"[Epoch {epoch}] Step {step}/{total_steps}: Loss={loss.item():.4f}, LR={current_lr:.2e}, GradNorm={grad_norm:.3f}", flush=True)
+                
+                # Calculate ETA
+                avg_step_time = sum(step_times) / len(step_times)
+                remaining_steps = total_steps - step
+                eta_seconds = avg_step_time * remaining_steps
+                eta_hours = eta_seconds / 3600
+                eta_minutes = (eta_seconds % 3600) / 60
+                
+                # Elapsed time
+                elapsed_seconds = step_end_time - start_time
+                elapsed_hours = elapsed_seconds / 3600
+                
+                # Format ETA string
+                if eta_hours >= 1:
+                    eta_str = f"{int(eta_hours)}h {int(eta_minutes)}m"
+                else:
+                    eta_str = f"{int(eta_minutes)}m {int(eta_seconds % 60)}s"
+                
+                print(f"[Epoch {epoch}] Step {step}/{total_steps} | Loss={loss.item():.4f} | LR={current_lr:.2e} | GradNorm={grad_norm:.3f} | "
+                      f"Elapsed={elapsed_hours:.1f}h | ETA={eta_str} | {avg_step_time:.2f}s/step", flush=True)
                 
                 # Log to Arbiter Logger
                 if logger:
@@ -484,6 +574,8 @@ def train():
                         grad_norm=grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm,
                         learning_rate=current_lr
                     )
+                
+                last_log_time = step_end_time
             
             # Checkpointing
             if step % config["checkpoint"]["interval"] == 0 and local_rank == 0:

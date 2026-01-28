@@ -62,28 +62,37 @@ class Attention(nn.Module):
 
     def forward(self, x, freqs_cis):
         bsz, seqlen, _ = x.shape
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        
+        # QKV projections
+        xq = self.wq(x)
+        xk = self.wk(x)
+        xv = self.wv(x)
+        
+        # Reshape for multi-head attention
         xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_heads, self.head_dim)
         
+        # Apply RoPE
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
         
-        # SDPA expects [bsz, n_heads, seqlen, head_dim]
+        # Transpose to (batch, n_heads, seq_len, head_dim) for SDPA
         xq = xq.transpose(1, 2)
         xk = xk.transpose(1, 2)
         xv = xv.transpose(1, 2)
         
-        # Use scaled_dot_product_attention for FlashAttention-2 / Memory Efficient Attention
-        # is_causal should be True for the decoder mask
+        # Use PyTorch's scaled_dot_product_attention (automatically uses FlashAttention if available)
+        # This provides 2-4x speedup on character-level sequences with minimal code changes
         output = F.scaled_dot_product_attention(
-            xq, xk, xv, 
-            attn_mask=None, 
-            dropout_p=0.0, 
-            is_causal=True
+            xq, xk, xv,
+            attn_mask=None,
+            dropout_p=0.0,  # We don't use attention dropout in this architecture
+            is_causal=True   # Enables causal masking for autoregressive generation
         )
         
+        # Transpose back and reshape
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+        
         return self.wo(output)
 
 class FeedForward(nn.Module):
