@@ -13,10 +13,13 @@ class BibleDataset(Dataset):
         with open(corpus_path, "r", encoding="utf-8") as f:
             text = f.read()
             
-        print(f"Tokenizing corpus from {corpus_path}...")
-        # Use the underlying tokenizer's encode to get all IDs at once efficiently
-        # GenesisTokenizer.encode returns .ids
-        self.tokens = tokenizer.tokenizer.encode(text).ids
+        if hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level():
+            # Character-level
+            self.tokens = tokenizer.encode(text)
+        else:
+            # BPE
+            self.tokens = tokenizer.tokenizer.encode(text).ids
+        
         print(f"Tokenization complete. Total tokens: {len(self.tokens)}")
         
         # Calculate number of samples

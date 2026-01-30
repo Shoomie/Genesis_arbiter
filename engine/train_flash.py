@@ -23,7 +23,7 @@ import time
 from datetime import timedelta
 
 # Core imports
-from models.llama.model import Llama, logos_init_hook
+from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
 from components.checkpoint import save_checkpoint
 from datasets.bible import get_bible_dataloader
@@ -258,10 +258,6 @@ def train(
     # Initialize model
     print("\nInitializing model...")
     model = Llama(**model_config)  # SDPA used internally
-   
-    
-    # Apply Jehovah token initialization
-    logos_init_hook(model)
     
     # Gradient checkpointing if requested
     if grad_checkpoint:

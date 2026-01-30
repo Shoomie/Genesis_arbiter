@@ -1,10 +1,21 @@
 import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
+import os
+import sys
+import math
+
+# Add parent directory to path for imports
+# Works both when run directly and from menu system
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+engine_dir = os.path.join(parent_dir, "engine")
+for d in [parent_dir, engine_dir]:
+    if d not in sys.path:
+        sys.path.insert(0, d)
+
 from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
-import os
-import math
 
 def calculate_perplexity(model, tokenizer, text, device):
     inputs = tokenizer(text).to(device)
@@ -23,10 +34,9 @@ def run_perplexity_test():
 
     print("=== Axiomatic Stability Check ===")
     
-    # 1. Load Tokenizer and verify Jehovah
+    # 1. Load Tokenizer
     tokenizer = GenesisTokenizer(tokenizer_path)
-    jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah")
-    print(f"Jehovah Token ID: {jhvh_id} (Expected 5)")
+    print(f"Tokenizer loaded: vocab size = {tokenizer.vocab_size}")
     
     # 2. Initialize Model (Resonant Blade 144-Layer)
     # Corrected based on checkpoint mismatch:

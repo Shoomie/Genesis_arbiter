@@ -11,7 +11,7 @@ import math
 import time
 
 # Core imports
-from models.llama.model import Llama, logos_init_hook
+from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
 from components.checkpoint import save_checkpoint
 from datasets.bible import get_bible_dataloader
@@ -380,29 +380,6 @@ def train():
     
     if local_rank == 0:
         print(f"✓ Model initialized: {model.get_num_params():,} parameters")
-    
-    # 6. Apply Jehovah Token Initialization
-    if local_rank == 0:
-        print(f"\n[Logos Initialization] Loading tokenizer...", flush=True)
-        jhvh_id = 5 # Default
-        tokenizer = None
-        
-        try:
-            tokenizer = find_tokenizer(model_cfg["vocab_size"])
-            if hasattr(tokenizer, 'tokenizer'):
-                jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
-                print(f"✓ Found 'Jehovah' token ID: {jhvh_id}", flush=True)
-        except Exception as e:
-            print(f"⚠ Warning: Tokenizer error: {e}")
-            try:
-                tokenizer = GenesisTokenizer("genesis_tokenizer.json")
-                jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
-            except:
-                print(f"⚠ Using default Jehovah ID: {jhvh_id}")
-        
-        # Apply initialization (1x multiplier)
-        logos_init_hook(model, jehovah_token_id=jhvh_id, multiplier=1.0)
-        print(f"✓ Jehovah token initialization applied (ID={jhvh_id}, multiplier=1.0)")
     
     # 7. Compilation
     if config["training"].get("compile", False):

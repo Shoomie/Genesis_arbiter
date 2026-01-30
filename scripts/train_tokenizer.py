@@ -13,7 +13,6 @@ def train_genesis_tokenizer(corpus_path, output_dir, vocab_size=8000):
         "</s>",
         "<unk>",
         "<mask>",
-        "Jehovah",
     ])
     
     # Save the trained tokenizer

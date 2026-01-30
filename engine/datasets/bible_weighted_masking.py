@@ -53,20 +53,26 @@ class WeightedMaskingDataset(Dataset):
         self.token_weights = {}
         self.word_to_id = {}  # For debugging
         
-        for word, weight in self.CONNECTIVE_WEIGHTS.items():
-            token_id = tokenizer.tokenizer.token_to_id(word)
-            if token_id is not None:
-                self.token_weights[token_id] = weight
-                self.word_to_id[word] = token_id
-        
-        print(f"[WeightedMasking] Loaded {len(self.token_weights)} connective token IDs")
-        if len(self.token_weights) > 0:
-            print(f"[WeightedMasking] Weight range: {min(self.token_weights.values()):.2f} - {max(self.token_weights.values()):.2f}")
-            print(f"[WeightedMasking] Sample mappings:")
-            for word in ["therefore", "because", "but", "so"]:
-                if word in self.word_to_id:
-                    tid = self.word_to_id[word]
-                    print(f"  '{word}' -> ID {tid}, weight {self.token_weights[tid]:.2f}")
+        if hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level():
+            # Character-level mode: Word-specific masking is disabled for now
+            # as it requires word boundary detection in char sequences.
+            print(f"[WeightedMasking] Running in character-level mode. Weighted masking of connectives disabled.")
+        else:
+            # BPE mode
+            for word, weight in self.CONNECTIVE_WEIGHTS.items():
+                token_id = tokenizer.tokenizer.token_to_id(word)
+                if token_id is not None:
+                    self.token_weights[token_id] = weight
+                    self.word_to_id[word] = token_id
+            
+            print(f"[WeightedMasking] Loaded {len(self.token_weights)} connective token IDs")
+            if len(self.token_weights) > 0:
+                print(f"[WeightedMasking] Weight range: {min(self.token_weights.values()):.2f} - {max(self.token_weights.values()):.2f}")
+                print(f"[WeightedMasking] Sample mappings:")
+                for word in ["therefore", "because", "but", "so"]:
+                    if word in self.word_to_id:
+                        tid = self.word_to_id[word]
+                        print(f"  '{word}' -> ID {tid}, weight {self.token_weights[tid]:.2f}")
         
         # Load corpus
         if not os.path.exists(corpus_path):
@@ -75,8 +81,11 @@ class WeightedMaskingDataset(Dataset):
         with open(corpus_path, "r", encoding="utf-8") as f:
             text = f.read()
         
-        print(f"[WeightedMasking] Tokenizing corpus from {corpus_path}...")
-        self.tokens = np.array(tokenizer.tokenizer.encode(text).ids, dtype=np.int32)
+        if hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level():
+            self.tokens = np.array(tokenizer.encode(text), dtype=np.int32)
+        else:
+            self.tokens = np.array(tokenizer.tokenizer.encode(text).ids, dtype=np.int32)
+        
         print(f"[WeightedMasking] Tokenization complete. Total tokens: {len(self.tokens)}")
         
         # Count connectives for statistics
@@ -88,8 +97,12 @@ class WeightedMaskingDataset(Dataset):
         self.num_samples = (len(self.tokens) - 1) // max_seq_len
         
         # Get mask token ID (or use 0 as fallback)
-        self.mask_token_id = tokenizer.tokenizer.token_to_id("[MASK]")
-        if self.mask_token_id is None:
+        if hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level():
+            self.mask_token_id = getattr(tokenizer, 'mask_id', 0)
+        else:
+            self.mask_token_id = tokenizer.tokenizer.token_to_id("[MASK]")
+        
+        if self.mask_token_id is None or self.mask_token_id == 0:
             # If no [MASK] token, use token ID 0 (usually padding/unknown)
             self.mask_token_id = 0
             print(f"[WeightedMasking] Warning: No [MASK] token found, using ID 0")

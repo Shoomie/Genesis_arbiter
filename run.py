@@ -38,12 +38,8 @@ def print_header():
     print(f"{Colors.CYAN}{Colors.BOLD}")
     print("=" * 70)
     print()
-    print("   ██████╗ ███████╗███╗   ██╗███████╗███████╗██╗███████╗")
-    print("  ██╔════╝ ██╔════╝████╗  ██║██╔════╝██╔════╝██║██╔════╝")
-    print("  ██║  ███╗█████╗  ██╔██╗ ██║█████╗  ███████╗██║███████╗")
-    print("  ██║   ██║██╔══╝  ██║╚██╗██║██╔══╝  ╚════██║██║╚════██║")
-    print("  ╚██████╔╝███████╗██║ ╚████║███████╗███████║██║███████║")
-    print("   ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝╚══════╝")
+    print("                     G E N E S I S")
+    print("              Bible-Trained Language Models")
     print()
     print("=" * 70)
     print(f"{Colors.ENDC}")
@@ -55,30 +51,32 @@ def print_menu():
     print(f"{Colors.BOLD}Main Menu:{Colors.ENDC}\n")
     
     print(f"{Colors.GREEN}[1]{Colors.ENDC} {Colors.BOLD}Train Model{Colors.ENDC}")
-    print("    ├─ [1a] FlashAttention Training (3-4x faster)")
-    print("    └─ [1b] Multi-Task Training (with grokking detection)\n")
+    print("    - [1a] FlashAttention Training (3-4x faster)")
+    print("    - [1b] Multi-Task Training (with grokking detection)\n")
     
     print(f"{Colors.GREEN}[2]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
-    print("    ├─ [2a] Count unique words")
-    print("    └─ [2b] Count logical connectives\n")
+    print("    - [2a] Count unique words")
+    print("    - [2b] Count logical connectives")
+    print("    - [2c] Pre-process Data (Create Training Data Cache File)\n")
     
     print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Evaluation & Testing{Colors.ENDC}")
-    print("    ├─ [3a] Calculate perplexity")
-    print("    └─ [3b] Run friction stress test\n")
+    print("    - [3a] Calculate perplexity")
+    print("    - [3b] Run friction stress test")
+    print("    - [3c] Interactive Checkpoint Chat\n")
     
     print(f"{Colors.GREEN}[4]{Colors.ENDC} {Colors.BOLD}Documentation{Colors.ENDC}")
-    print("    ├─ [4a] Quick Reference Guide")
-    print("    ├─ [4b] Theoretical Foundations")
-    print("    ├─ [4c] Setup Guide (FlashAttention)")
-    print("    ├─ [4d] Grokking Detection Methodology")
-    print("    └─ [4e] Research Roadmap\n")
+    print("    - [4a] Quick Reference Guide")
+    print("    - [4b] Theoretical Foundations")
+    print("    - [4c] Setup Guide (FlashAttention)")
+    print("    - [4d] Grokking Detection Methodology")
+    print("    - [4e] Research Roadmap\n")
     
     print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation{Colors.ENDC}")
-    print("    ├─ [5a] Verify FlashAttention Setup")
-    print("    ├─ [5b] Quick Evaluation")
-    print("    ├─ [5c] Long Training Pipeline")
-    print("    ├─ [5d] Parameter Sweep")
-    print("    └─ [5e] Data Augmentation\n")
+    print("    - [5a] Verify FlashAttention Setup")
+    print("    - [5b] Quick Evaluation")
+    print("    - [5c] Long Training Pipeline")
+    print("    - [5d] Parameter Sweep")
+    print("    - [5e] Data Augmentation\n")
     
     print(f"{Colors.YELLOW}[6]{Colors.ENDC} {Colors.BOLD}Project Information{Colors.ENDC}")
     print("    View project statistics and status\n")
@@ -86,36 +84,42 @@ def print_menu():
     print(f"{Colors.RED}[0]{Colors.ENDC} {Colors.BOLD}Exit{Colors.ENDC}\n")
     print("=" * 70)
 
-def run_script(script_path, description):
+def run_script(script_path, description, args=None):
     """Run a Python script with proper error handling."""
-    print(f"\n{Colors.CYAN}▶ {description}...{Colors.ENDC}\n")
+    print(f"\n{Colors.CYAN}> {description}...{Colors.ENDC}\n")
+    if args is None:
+        args = []
+        
     try:
-        # Change to script directory for relative imports
+        # Change to script directory for relative imports, but keep full path for execution if needed
         script_dir = os.path.dirname(script_path)
         script_name = os.path.basename(script_path)
         
+        # Prepare command
         if script_dir:
-            subprocess.run([sys.executable, script_name], cwd=script_dir, check=True)
+            cmd = [sys.executable, script_name] + args
+            subprocess.run(cmd, cwd=script_dir, check=True)
         else:
-            subprocess.run([sys.executable, script_path], check=True)
+            cmd = [sys.executable, script_path] + args
+            subprocess.run(cmd, check=True)
             
     except subprocess.CalledProcessError as e:
-        print(f"\n{Colors.RED}✗ Error: Script exited with code {e.returncode}{Colors.ENDC}")
+        print(f"\n{Colors.RED}[X] Error: Script exited with code {e.returncode}{Colors.ENDC}")
     except FileNotFoundError:
-        print(f"\n{Colors.RED}✗ Error: Script not found: {script_path}{Colors.ENDC}")
+        print(f"\n{Colors.RED}[X] Error: Script not found: {script_path}{Colors.ENDC}")
     except Exception as e:
-        print(f"\n{Colors.RED}✗ Error: {str(e)}{Colors.ENDC}")
+        print(f"\n{Colors.RED}[X] Error: {str(e)}{Colors.ENDC}")
     
     input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.ENDC}")
 
 def open_documentation(doc_path):
     """Open a documentation file in the default viewer."""
     if not os.path.exists(doc_path):
-        print(f"\n{Colors.RED}✗ Error: File not found: {doc_path}{Colors.ENDC}")
+        print(f"\n{Colors.RED}[X] Error: File not found: {doc_path}{Colors.ENDC}")
         input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.ENDC}")
         return
     
-    print(f"\n{Colors.CYAN}▶ Opening {os.path.basename(doc_path)}...{Colors.ENDC}")
+    print(f"\n{Colors.CYAN}> Opening {os.path.basename(doc_path)}...{Colors.ENDC}")
     
     try:
         if sys.platform == 'win32':
@@ -125,9 +129,9 @@ def open_documentation(doc_path):
         else:  # Linux
             subprocess.run(['xdg-open', doc_path])
         
-        print(f"{Colors.GREEN}✓ Document opened in default application{Colors.ENDC}")
+        print(f"{Colors.GREEN}[OK] Document opened in default application{Colors.ENDC}")
     except Exception as e:
-        print(f"{Colors.YELLOW}⚠ Could not open automatically. Path: {doc_path}{Colors.ENDC}")
+        print(f"{Colors.YELLOW}[!] Could not open automatically. Path: {doc_path}{Colors.ENDC}")
     
     input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.ENDC}")
 
@@ -136,7 +140,7 @@ def show_project_info():
     clear_screen()
     print_header()
     
-    print(f"{Colors.BOLD}📊 Project Statistics{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}[Stats] Project Statistics{Colors.ENDC}\n")
     
     # Count files and directories
     engine_files = sum(1 for _ in Path('engine').rglob('*.py'))
@@ -159,7 +163,7 @@ def show_project_info():
         checkpoint_count = sum(1 for _ in checkpoint_dir.rglob('*.pt'))
         print(f"  {Colors.CYAN}Saved Checkpoints:{Colors.ENDC} {checkpoint_count}")
     
-    print(f"\n{Colors.BOLD}📁 Project Structure:{Colors.ENDC}\n")
+    print(f"\n{Colors.BOLD}[Folders] Project Structure:{Colors.ENDC}\n")
     print("  Genesis_arbiter/")
     print("  ├── engine/              # Core training system")
     print("  │   ├── models/          # Transformer architectures")
@@ -172,12 +176,12 @@ def show_project_info():
     print("  ├── scripts/             # Utility tools")
     print("  └── checkpoints/         # Model snapshots")
     
-    print(f"\n{Colors.BOLD}🎯 Framework Status:{Colors.ENDC}")
-    print(f"  {Colors.GREEN}✅ Phase 1:{Colors.ENDC} FlashAttention Integration (3-4x speedup)")
-    print(f"  {Colors.GREEN}✅ Phase 2:{Colors.ENDC} Multi-Task Learning (142 translations)")
-    print(f"  {Colors.GREEN}✅ Phase 3:{Colors.ENDC} Grokking Detection & Monitoring")
+    print(f"\n{Colors.BOLD}[Status] Framework Status:{Colors.ENDC}")
+    print(f"  {Colors.GREEN}[OK] Phase 1:{Colors.ENDC} FlashAttention Integration (3-4x speedup)")
+    print(f"  {Colors.GREEN}[OK] Phase 2:{Colors.ENDC} Multi-Task Learning (142 translations)")
+    print(f"  {Colors.GREEN}[OK] Phase 3:{Colors.ENDC} Grokking Detection & Monitoring")
     
-    print(f"\n{Colors.BOLD}📌 Ready for:{Colors.ENDC} Production training runs with automated grokking detection")
+    print(f"\n{Colors.BOLD}[Ready] Ready for:{Colors.ENDC} Production training runs with automated grokking detection")
     
     input(f"\n{Colors.YELLOW}Press Enter to return to menu...{Colors.ENDC}")
 
@@ -194,7 +198,11 @@ def main():
             run_script('engine/train_flash.py', 'Launching FlashAttention Training (Native PyTorch)')
         
         elif choice == '1b':
-            run_script('engine/train_native_multi_task.py', 'Launching Multi-Task Training + Grokking Detection')
+            # run_script('engine/train_native_multi_task.py', 'Training (Native PyTorch)', args=["--mode", "microscope", "--resume"])
+            # Or asking user? The request said "modify the option". 
+            # I'll just add it to the command.
+            print(f"\n{Colors.CYAN}Starting training (Auto-Resume enabled)...{Colors.ENDC}")
+            run_script('engine/train_native_multi_task.py', 'Training (Native PyTorch)', args=["--mode", "microscope", "--resume"])
         
         elif choice == '2a':
             run_script('scripts/count_unique_words.py', 'Analyzing Corpus Vocabulary')
@@ -202,11 +210,17 @@ def main():
         elif choice == '2b':
             run_script('scripts/count_logical_connectives.py', 'Counting Logical Connectives')
         
+        elif choice == '2c':
+            run_script('scripts/update_data_cache.py', 'Updating VRAM Data Cache')
+        
         elif choice == '3a':
             run_script('scripts/arbiter_perplexity.py', 'Calculating Model Perplexity')
         
         elif choice == '3b':
             run_script('scripts/friction_stress_test.py', 'Running Friction Stress Test')
+            
+        elif choice == '3c':
+            run_script('scripts/interact_with_checkpoint.py', 'Interactive Checkpoint Chat')
         
         elif choice == '4a':
             open_documentation('docs/reference/QUICK_REFERENCE.md')

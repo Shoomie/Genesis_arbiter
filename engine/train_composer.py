@@ -30,7 +30,7 @@ except ImportError:
     exit(1)
 
 # Core imports
-from models.llama.model import Llama, logos_init_hook
+from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
 from datasets.bible import get_bible_dataloader
 from components.checkpoint import save_checkpoint
@@ -353,17 +353,9 @@ def train():
     
     print(f"✓ Model initialized: {base_model.get_num_params():,} parameters")
     
-    # Apply Jehovah token initialization
-    print(f"\n[Logos Initialization] Loading tokenizer...")
+    # Load tokenizer
+    print(f"\nLoading tokenizer...")
     tokenizer = find_tokenizer(model_cfg["vocab_size"])
-    jhvh_id = 5  # Default
-    
-    if hasattr(tokenizer, 'tokenizer'):
-        jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
-        print(f"✓ Found 'Jehovah' token ID: {jhvh_id}")
-    
-    logos_init_hook(base_model, jehovah_token_id=jhvh_id, multiplier=1.0)
-    print(f"✓ Jehovah token initialization applied (ID={jhvh_id}, multiplier=1.0)")
     
     # Wrap model for Composer
     composer_model = GenesisComposerModel(base_model)

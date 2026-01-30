@@ -1,9 +1,21 @@
 import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
+import numpy as np
+import os
+import sys
+
+# Add parent directory to path for imports
+# Works both when run directly and from menu system
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+engine_dir = os.path.join(parent_dir, "engine")
+for d in [parent_dir, engine_dir]:
+    if d not in sys.path:
+        sys.path.insert(0, d)
+
 from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
-import numpy as np
 
 def get_friction_profile(model, tokenizer, text, device):
     inputs = tokenizer(text).to(device)

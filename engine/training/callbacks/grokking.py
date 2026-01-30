@@ -163,6 +163,12 @@ class ProcrustesMonitor(BaseCallback):
     
     def on_train_start(self, model: torch.nn.Module, **kwargs):
         """Called at the start of training."""
+        # Check if we have enough languages
+        if len(self.languages) < 2:
+            print(f"ProcrustesMonitor: [DISABLED] Not enough languages for alignment (Found: {self.languages})")
+            self.eval_interval = 999999999 # Effectively disable
+            return
+
         # TODO: Load verse pairs from Bible data directory
         print(f"ProcrustesMonitor: Monitoring alignment for {self.languages}")
     

@@ -22,7 +22,7 @@ from composer.loggers import TensorBoardLogger
 from composer.core import DataSpec
 
 # Genesis Arbiter
-from models.llama.model import Llama, logos_init_hook
+from models.llama.model import Llama
 from models.tokenizer import GenesisTokenizer
 from models.multi_task_wrapper import MultiTaskLlama
 from datasets.multi_task_sampler import get_multi_task_dataloader
@@ -146,14 +146,8 @@ def train_multi_task():
     
     print(f"✓ Base model: {base_model.get_num_params():,} parameters")
     
-    # Apply Jehovah token initialization
+    # Load tokenizer
     tokenizer = find_tokenizer(model_cfg["vocab_size"])
-    jhvh_id = 5
-    if hasattr(tokenizer, 'tokenizer'):
-        jhvh_id = tokenizer.tokenizer.token_to_id("Jehovah") or 5
-    
-    logos_init_hook(base_model, jehovah_token_id=jhvh_id, multiplier=1.0)
-    print(f"✓ Jehovah token initialization applied (ID={jhvh_id})")
     
     # Wrap in multi-task model
     print(f"\n>>> Creating multi-task wrapper...")

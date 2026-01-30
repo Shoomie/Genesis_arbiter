@@ -188,27 +188,3 @@ class Llama(nn.Module):
 
     def get_num_params(self):
         return sum(p.numel() for p in self.parameters())
-
-def jehovah_token_init(model, jehovah_token_id=5, multiplier=1.0):
-    """
-    Jehovah Token Initialization Hook: 
-    Sets the initial weight variance of the 'Jehovah' token embedding to test the impact
-    of special initialization for high-frequency domain-specific tokens.
-    
-    Args:
-        model: The language model with token embeddings
-        jehovah_token_id: Token ID for "Jehovah" (default: 5)
-        multiplier: Variance scaling factor (default: 1.0 = baseline)
-    """
-    import math
-    with torch.no_grad():
-        emb = model.tok_embeddings.weight
-        std = emb.std().item()
-        # Scale factor: sqrt(multiplier) to get linear variance boost
-        scale = math.sqrt(multiplier)
-        new_weights = torch.randn(emb.shape[1], device=emb.device) * std * scale
-        emb[jehovah_token_id] = new_weights
-        print(f"Jehovah token initialization applied to token ID {jehovah_token_id} with multiplier {multiplier}x (scale {scale:.4f})")
-
-# Keep the old name as an alias for backward compatibility
-logos_init_hook = jehovah_token_init
