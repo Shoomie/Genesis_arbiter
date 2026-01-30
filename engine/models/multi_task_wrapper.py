@@ -26,6 +26,8 @@ class MultiTaskLlama(nn.Module):
     def __init__(
         self,
         base_model: nn.Module,
+        dim: int = None,
+        vocab_size: int = None,
         coherence_hidden_dim: int = 1024,
         enable_cross_ref: bool = True,
         enable_paraphrase: bool = True,
@@ -36,6 +38,8 @@ class MultiTaskLlama(nn.Module):
         
         Args:
             base_model: The base Llama transformer model
+            dim: Model dimension (required if base_model doesn't have .dim attribute)
+            vocab_size: Vocabulary size (required if base_model doesn't have .vocab_size attribute)
             coherence_hidden_dim: Hidden dimension for coherence detection MLP
             enable_cross_ref: Whether to enable cross-reference task
             enable_paraphrase: Whether to enable paraphrase task
@@ -43,7 +47,15 @@ class MultiTaskLlama(nn.Module):
         """
         super().__init__()
         self.base = base_model
-        self.dim = base_model.dim
+        
+        # Get dim and vocab_size from base_model or parameters
+        self.dim = dim if dim is not None else getattr(base_model, 'dim', None)
+        self.vocab_size = vocab_size if vocab_size is not None else getattr(base_model, 'vocab_size', None)
+        
+        if self.dim is None:
+            raise ValueError("dim must be provided either via parameter or base_model.dim")
+        if self.vocab_size is None:
+            raise ValueError("vocab_size must be provided either via parameter or base_model.vocab_size")
         
         # Task flags
         self.enable_cross_ref = enable_cross_ref
@@ -53,7 +65,7 @@ class MultiTaskLlama(nn.Module):
         self.cross_ref_margin = cross_ref_margin
         
         # ===== Task Head 1: Language Modeling (Standard Causal LM) =====
-        self.lm_head = nn.Linear(self.dim, base_model.vocab_size, bias=False)
+        self.lm_head = nn.Linear(self.dim, self.vocab_size, bias=False)
         # Tie weights with input embeddings (common practice)
         self.lm_head.weight = base_model.tok_embeddings.weight
         
@@ -97,8 +109,8 @@ class MultiTaskLlama(nn.Module):
         Returns:
             Verse embedding, shape (batch_size, dim)
         """
-        # Pass through transformer
-        h, _ = self.base(tokens)  # Shape: (batch, seq_len, dim)
+        # Pass through transformer (request hidden states)
+        h, _ = self.base(tokens, return_hiddens=True)  # Shape: (batch, seq_len, dim)
         
         # Pool to sentence-level (mean pooling over sequence)
         verse_emb = h.mean(dim=1)  # Shape: (batch, dim)
@@ -117,7 +129,7 @@ class MultiTaskLlama(nn.Module):
             (logits, loss)
         """
         # Get hidden states from base model
-        h, _ = self.base(tokens)  # Shape: (batch, seq_len, dim)
+        h, _ = self.base(tokens, return_hiddens=True)  # Shape: (batch, seq_len, dim)
         
         # Project to vocabulary
         logits = self.lm_head(h)  # Shape: (batch, seq_len, vocab_size)
@@ -129,7 +141,7 @@ class MultiTaskLlama(nn.Module):
             ignore_index=-100  # Ignore padding tokens
         )
         
-        return logits, loss
+        return loss, logits
     
     def forward_coherence(
         self, 
@@ -161,7 +173,7 @@ class MultiTaskLlama(nn.Module):
         # Binary cross-entropy loss
         loss = F.binary_cross_entropy_with_logits(logits, labels.float())
         
-        return logits, loss
+        return loss, logits
     
     def forward_cross_ref(
         self,
@@ -196,7 +208,7 @@ class MultiTaskLlama(nn.Module):
         # We want d_pos > d_neg + margin
         loss = F.relu(d_neg - d_pos + self.cross_ref_margin).mean()
         
-        return anchor_emb, positive_emb, negative_emb, loss
+        return loss, (anchor_emb, positive_emb, negative_emb)
     
     def forward_paraphrase(
         self,
@@ -235,7 +247,7 @@ class MultiTaskLlama(nn.Module):
         # BCE loss
         loss = F.binary_cross_entropy_with_logits(logits, labels.float())
         
-        return similarity, loss
+        return loss, similarity
     
     def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, str]:
         """
@@ -252,11 +264,11 @@ class MultiTaskLlama(nn.Module):
         task = batch['task']
         
         if task == 'lm':
-            outputs, loss = self.forward_lm(batch['tokens'], batch['labels'])
+            loss, outputs = self.forward_lm(batch['tokens'], batch['labels'])
             return outputs, loss, 'lm'
         
         elif task == 'coherence':
-            outputs, loss = self.forward_coherence(
+            loss, outputs = self.forward_coherence(
                 batch['verse1_tokens'],
                 batch['verse2_tokens'],
                 batch['labels']
@@ -264,17 +276,16 @@ class MultiTaskLlama(nn.Module):
             return outputs, loss, 'coherence'
         
         elif task == 'cross_ref':
-            outputs = self.forward_cross_ref(
+            loss, outputs = self.forward_cross_ref(
                 batch['anchor_tokens'],
                 batch['positive_tokens'],
                 batch['negative_tokens']
             )
-            # Note: outputs is a tuple (anchor_emb, pos_emb, neg_emb, loss)
-            loss = outputs[-1]
+            # Note: outputs is a tuple (anchor_emb, pos_emb, neg_emb)
             return outputs, loss, 'cross_ref'
         
         elif task == 'paraphrase':
-            outputs, loss = self.forward_paraphrase(
+            loss, outputs = self.forward_paraphrase(
                 batch['verse1_tokens'],
                 batch['verse2_tokens'],
                 batch['labels']

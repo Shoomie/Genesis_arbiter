@@ -34,7 +34,10 @@ class BibleDataset(Dataset):
         # Target tokens (shifted by 1)
         y = torch.tensor(self.tokens[start_idx+1:end_idx+1], dtype=torch.long)
         
-        return x, y
+        return {
+            "input_ids": x,
+            "labels": y
+        }
 
 def get_bible_dataloader(corpus_path, tokenizer, batch_size, max_seq_len, world_size=1, rank=0):
     dataset = BibleDataset(corpus_path, tokenizer, max_seq_len)

@@ -158,7 +158,7 @@ class Llama(nn.Module):
     def gradient_checkpointing_enable(self):
         self.gradient_checkpointing = True
 
-    def forward(self, tokens, labels=None):
+    def forward(self, tokens, labels=None, return_hiddens=False):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
         self.freqs_cis = self.freqs_cis.to(h.device)
@@ -172,6 +172,10 @@ class Llama(nn.Module):
                 h = layer(h, freqs_cis)
         
         h = self.norm(h)
+        
+        if return_hiddens:
+            return h, None
+            
         logits = self.output(h)
         
         if labels is not None:

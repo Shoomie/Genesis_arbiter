@@ -191,10 +191,10 @@ def main():
         choice = input(f"{Colors.BOLD}Select an option: {Colors.ENDC}").strip().lower()
         
         if choice == '1a':
-            run_script('engine/train_composer.py', 'Launching FlashAttention Training System')
+            run_script('engine/train_flash.py', 'Launching FlashAttention Training (Native PyTorch)')
         
         elif choice == '1b':
-            run_script('engine/train_multi_task.py', 'Launching Multi-Task Training with Grokking Detection')
+            run_script('engine/train_native_multi_task.py', 'Launching Multi-Task Training + Grokking Detection')
         
         elif choice == '2a':
             run_script('scripts/count_unique_words.py', 'Analyzing Corpus Vocabulary')

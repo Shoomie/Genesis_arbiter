@@ -67,6 +67,18 @@ class FlashAttentionConfig:
         print("=" * 60)
 
 
+def print_flash_attention_status():
+    """Convenience function to print FlashAttention status."""
+    config = FlashAttentionConfig()
+    config.print_status()
+
+
+def is_flash_attention_available() -> bool:
+    """Check if FlashAttention is available."""
+    config = FlashAttentionConfig()
+    return config.available
+
+
 @contextmanager
 def force_flash_attention(enabled: bool = True):
     """

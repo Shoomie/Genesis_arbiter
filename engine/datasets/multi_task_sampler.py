@@ -84,12 +84,16 @@ class MultiTaskDataset(Dataset):
         """
         Load Bible translations from the Bible data directory.
         
+        Only loads COMPLETE translations with exactly 1188 chapters (full Bible).
+        
         Returns:
             Dictionary mapping locale -> list of verses
         """
         translations = {}
+        incomplete_count = 0
+        incomplete_examples = []
         
-        # Only load complete translations (1188 chapters)
+        # Only load complete translations (1188 chapters = complete Bible)
         for locale_dir in self.bible_data_dir.iterdir():
             if not locale_dir.is_dir():
                 continue
@@ -102,11 +106,25 @@ class MultiTaskDataset(Dataset):
                 with open(bible_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
-                # Only use complete translations
+                # Only use complete translations (1188 chapters = 66 books complete)
                 if len(data) == 1188:
                     translations[locale_dir.name] = data
+                else:
+                    incomplete_count += 1
+                    if len(incomplete_examples) < 5:
+                        incomplete_examples.append(f"{locale_dir.name} ({len(data)} chapters)")
             except Exception as e:
                 print(f"  Warning: Failed to load {locale_dir.name}: {e}")
+        
+        # Report statistics
+        total_found = len(translations) + incomplete_count
+        print(f"  Found {total_found} translation directories")
+        print(f"  [OK] Loaded {len(translations)} complete translations (1188 chapters each)")
+        
+        if incomplete_count > 0:
+            print(f"  [SKIP] Skipped {incomplete_count} incomplete translations (still being scraped)")
+            if incomplete_examples:
+                print(f"    Examples: {', '.join(incomplete_examples)}")
         
         return translations
     
@@ -155,10 +173,10 @@ class MultiTaskDataset(Dataset):
         verse = self.rng.choice(self.verses)
         
         # Tokenize
-        tokens = self.tokenizer.encode(verse, max_length=self.max_seq_len, truncation=True)
+        tokens = self.tokenizer.encode(verse)[:self.max_seq_len]  # Truncate manually
         
         # Create labels (shifted by 1 for autoregressive prediction)
-        labels = tokens[1:] + [self.tokenizer.pad_token_id]
+        labels = tokens[1:] + [0]  # Use 0 as pad token
         
         # Convert to tensors
         tokens = torch.tensor(tokens[:self.max_seq_len], dtype=torch.long)
@@ -167,13 +185,13 @@ class MultiTaskDataset(Dataset):
         # Pad if necessary
         if len(tokens) < self.max_seq_len:
             padding = self.max_seq_len - len(tokens)
-            tokens = torch.cat([tokens, torch.full((padding,), self.tokenizer.pad_token_id, dtype=torch.long)])
+            tokens = torch.cat([tokens, torch.zeros((padding,), dtype=torch.long)])  # Pad with 0
             labels = torch.cat([labels, torch.full((padding,), -100, dtype=torch.long)])  # -100 = ignore
         
         return {
             'task': 'lm',
-            'tokens': tokens,
-            'labels': labels
+            'tokens': tokens.unsqueeze(0),  # Add batch dimension -> (1, seq_len)
+            'labels': labels.unsqueeze(0)   # Add batch dimension -> (1, seq_len)
         }
     
     def _get_coherence_sample(self) -> Dict:
@@ -201,11 +219,11 @@ class MultiTaskDataset(Dataset):
         
         # Tokenize
         verse1_tokens = torch.tensor(
-            self.tokenizer.encode(verse1, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(verse1)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         verse2_tokens = torch.tensor(
-            self.tokenizer.encode(verse2, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(verse2)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         
@@ -213,19 +231,19 @@ class MultiTaskDataset(Dataset):
         if len(verse1_tokens) < self.max_seq_len:
             verse1_tokens = torch.cat([
                 verse1_tokens,
-                torch.full((self.max_seq_len - len(verse1_tokens),), self.tokenizer.pad_token_id, dtype=torch.long)
+                torch.zeros((self.max_seq_len - len(verse1_tokens),), dtype=torch.long)  # Pad with 0
             ])
         if len(verse2_tokens) < self.max_seq_len:
             verse2_tokens = torch.cat([
                 verse2_tokens,
-                torch.full((self.max_seq_len - len(verse2_tokens),), self.tokenizer.pad_token_id, dtype=torch.long)
+                torch.zeros((self.max_seq_len - len(verse2_tokens),), dtype=torch.long)  # Pad with 0
             ])
         
         return {
             'task': 'coherence',
-            'verse1_tokens': verse1_tokens[:self.max_seq_len],
-            'verse2_tokens': verse2_tokens[:self.max_seq_len],
-            'labels': torch.tensor(label, dtype=torch.float32)
+            'verse1_tokens': verse1_tokens[:self.max_seq_len].unsqueeze(0),  # Add batch dim
+            'verse2_tokens': verse2_tokens[:self.max_seq_len].unsqueeze(0),  # Add batch dim
+            'labels': torch.tensor(label, dtype=torch.float32).unsqueeze(0)   # Add batch dim
         }
     
     def _get_cross_ref_sample(self) -> Dict:
@@ -256,32 +274,34 @@ class MultiTaskDataset(Dataset):
         
         # Tokenize all three
         anchor_tokens = torch.tensor(
-            self.tokenizer.encode(anchor, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(anchor)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         positive_tokens = torch.tensor(
-            self.tokenizer.encode(positive, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(positive)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         negative_tokens = torch.tensor(
-            self.tokenizer.encode(negative, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(negative)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         
-        # Pad
-        for tokens in [anchor_tokens, positive_tokens, negative_tokens]:
-            if len(tokens) < self.max_seq_len:
-                padding = self.max_seq_len - len(tokens)
-                tokens = torch.cat([
-                    tokens,
-                    torch.full((padding,), self.tokenizer.pad_token_id, dtype=torch.long)
-                ])
+        # Pad all three tensors
+        if len(anchor_tokens) < self.max_seq_len:
+            padding = self.max_seq_len - len(anchor_tokens)
+            anchor_tokens = torch.cat([anchor_tokens, torch.zeros((padding,), dtype=torch.long)])
+        if len(positive_tokens) < self.max_seq_len:
+            padding = self.max_seq_len - len(positive_tokens)
+            positive_tokens = torch.cat([positive_tokens, torch.zeros((padding,), dtype=torch.long)])
+        if len(negative_tokens) < self.max_seq_len:
+            padding = self.max_seq_len - len(negative_tokens)
+            negative_tokens = torch.cat([negative_tokens, torch.zeros((padding,), dtype=torch.long)])
         
         return {
             'task': 'cross_ref',
-            'anchor_tokens': anchor_tokens[:self.max_seq_len],
-            'positive_tokens': positive_tokens[:self.max_seq_len],
-            'negative_tokens': negative_tokens[:self.max_seq_len]
+            'anchor_tokens': anchor_tokens[:self.max_seq_len].unsqueeze(0),    # Add batch dim
+            'positive_tokens': positive_tokens[:self.max_seq_len].unsqueeze(0),  # Add batch dim
+            'negative_tokens': negative_tokens[:self.max_seq_len].unsqueeze(0)   # Add batch dim
         }
     
     def _get_paraphrase_sample(self) -> Dict:
@@ -338,11 +358,11 @@ class MultiTaskDataset(Dataset):
         
         # Tokenize
         verse1_tokens = torch.tensor(
-            self.tokenizer.encode(verse1_text, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(verse1_text)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         verse2_tokens = torch.tensor(
-            self.tokenizer.encode(verse2_text, max_length=self.max_seq_len, truncation=True),
+            self.tokenizer.encode(verse2_text)[:self.max_seq_len],  # Truncate manually
             dtype=torch.long
         )
         
@@ -350,19 +370,19 @@ class MultiTaskDataset(Dataset):
         if len(verse1_tokens) < self.max_seq_len:
             verse1_tokens = torch.cat([
                 verse1_tokens,
-                torch.full((self.max_seq_len - len(verse1_tokens),), self.tokenizer.pad_token_id, dtype=torch.long)
+                torch.zeros((self.max_seq_len - len(verse1_tokens),), dtype=torch.long)  # Pad with 0
             ])
         if len(verse2_tokens) < self.max_seq_len:
             verse2_tokens = torch.cat([
                 verse2_tokens,
-                torch.full((self.max_seq_len - len(verse2_tokens),), self.tokenizer.pad_token_id, dtype=torch.long)
+                torch.zeros((self.max_seq_len - len(verse2_tokens),), dtype=torch.long)  # Pad with 0
             ])
         
         return {
             'task': 'paraphrase',
-            'verse1_tokens': verse1_tokens[:self.max_seq_len],
-            'verse2_tokens': verse2_tokens[:self.max_seq_len],
-            'labels': torch.tensor(label, dtype=torch.float32)
+            'verse1_tokens': verse1_tokens[:self.max_seq_len].unsqueeze(0),  # Add batch dim
+            'verse2_tokens': verse2_tokens[:self.max_seq_len].unsqueeze(0),  # Add batch dim
+            'labels': torch.tensor(label, dtype=torch.float32).unsqueeze(0)   # Add batch dim
         }
     
     def __len__(self):
@@ -425,11 +445,9 @@ def get_multi_task_dataloader(
         seed=seed
     )
     
-    # Custom collate function to handle different task types
+    # Custom collate function  - always return first element
     def collate_fn(batch):
-        # All samples in a batch should be the same task
-        # (enforced by sampling)
-        return batch[0] if len(batch) == 1 else batch
+        return batch[0]
     
     return DataLoader(
         dataset,
