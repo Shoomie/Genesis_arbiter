@@ -14,18 +14,18 @@ import torch.nn as nn
 from pathlib import Path
 
 # Config
-from .training.config import TrainingConfig, ModelConfig
-from .utils.config_loader import get_config_section, resolve_vocab_size, get_data_path
+from genesis.training.config import TrainingConfig, ModelConfig
+from genesis.utils.config_loader import get_config_section, resolve_vocab_size, get_data_path
 
 # Trainer
-from .training.trainer import GenesisTrainer
+from genesis.training.trainer import GenesisTrainer
 
 # Models & Data
-from .models.llama.model import Transformer, ModelArgs
-from .models.multi_task_wrapper import MultiTaskLlama
-from .models.tokenizer import GenesisTokenizer
-from .datasets.multi_task_sampler import get_multi_task_dataloader
-from .training.flash_attention_config import print_flash_attention_status
+from genesis.models.llama.model import Llama
+from genesis.models.multi_task_wrapper import MultiTaskLlama
+from genesis.models.tokenizer import GenesisTokenizer
+from genesis.datasets.multi_task_sampler import get_multi_task_dataloader
+from genesis.training.flash_attention_config import print_flash_attention_status
 
 def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, ModelConfig]:
     """Load settings from genesis_config.toml and override with args."""
@@ -99,17 +99,15 @@ def get_model(mode: str, device: str, vocab_size: Optional[int] = None) -> Multi
     
     
     # Base Llama
-    model_args = ModelArgs(
-        dim=cfg.dim,
-        n_layers=cfg.n_layers,
-        n_heads=cfg.n_heads,
+    base_model = Llama(
         vocab_size=cfg.vocab_size,
-        multiple_of=256,
-        norm_eps=1e-5,
-        max_seq_len=1024
+        n_layers=cfg.n_layers,
+        dim=cfg.dim,
+        n_heads=cfg.n_heads,
+        intermediate_size=cfg.intermediate_size,
+        max_seq_len=1024,
+        norm_type=cfg.norm_type
     )
-    
-    base_model = Transformer(model_args)
     
     # Multi-Task Wrapper
     model = MultiTaskLlama(

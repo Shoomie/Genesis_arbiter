@@ -23,8 +23,8 @@ from dataclasses import dataclass
 
 # Import our modules
 try:
-    from ..utils.logger import ArbiterLogger
-    from .quick_eval import ArbiterQuickEval
+    from genesis.utils.logger import ArbiterLogger
+    from genesis.pipelines.quick_eval import ArbiterQuickEval
     
     # Tools are imported as absolute from the root if root added to PYTHONPATH, 
     # or we can use relative if they were in the same package.
@@ -34,8 +34,8 @@ try:
 except ImportError:
     # Fallback to direct imports if run in a way that 'tools' is not a package
     try:
-        from . import arbiter_logger as ArbiterLogger
-        from . import arbiter_quick_eval as ArbiterQuickEval
+        from genesis.utils.logger import ArbiterLogger
+        from genesis.pipelines.quick_eval import ArbiterQuickEval
     except:
         print("[WARNING] Some modules not found - running in simulation mode")
 
