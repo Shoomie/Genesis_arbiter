@@ -7,6 +7,7 @@ Now refactored to use the modular 'GenesisTrainer' architecture.
 """
 
 import os
+from typing import Tuple, Optional
 import argparse
 import torch
 import torch.nn as nn
@@ -14,7 +15,7 @@ from pathlib import Path
 
 # Config
 from .training.config import TrainingConfig, ModelConfig
-from .utils.config_loader import get_config_section
+from .utils.config_loader import get_config_section, resolve_vocab_size, get_data_path
 
 # Trainer
 from .training.trainer import GenesisTrainer
@@ -26,7 +27,7 @@ from .models.tokenizer import GenesisTokenizer
 from .datasets.multi_task_sampler import get_multi_task_dataloader
 from .training.flash_attention_config import print_flash_attention_status
 
-def load_global_config_into_training_config(args) -> TrainingConfig:
+def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, ModelConfig]:
     """Load settings from genesis_config.toml and override with args."""
     
     # 1. Load TOML defaults
@@ -41,25 +42,43 @@ def load_global_config_into_training_config(args) -> TrainingConfig:
     merged_config.update(sys_cfg_dict)
     merged_config.update(eval_cfg_dict)
     merged_config.update(data_cfg_dict)
-    
-    # Normalize keys (TOML naming to Python attr naming if needed)
-    # The dataclass uses lowercase, our TOML uses lowercase mostly.
-    
-    # 2. Override with CLI args
-    if args.learning_rate: merged_config['learning_rate'] = args.learning_rate
-    if args.batch_size: merged_config['batch_size'] = args.batch_size
-    if args.steps: merged_config['max_steps'] = args.steps
-    if args.val_interval: merged_config['val_interval'] = args.val_interval
-    if args.eval_interval: merged_config['eval_interval'] = args.eval_interval
-    if args.compile: merged_config['compile_model'] = True
-    if args.gradient_checkpointing: merged_config['gradient_checkpointing'] = True
-    
-    # Create config object (safely ignoring unknown keys from TOML)
-    config = TrainingConfig.from_dict(merged_config)
-    
-    return config
 
-def get_model(mode: str, device: str) -> MultiTaskLlama:
+    # Create config object
+    # We call resolve_vocab_size on the merged dict (mimicking structure expected by resolver)
+    # Resolver expects {'model': {...}, 'data': {...}}
+    # But merged_config is flat.
+    # Re-construct a structured dict for resolution
+    structured_config = {
+        "model": {"vocab_size": merged_config.get("vocab_size", "auto") if "vocab_size" in merged_config else "auto"}, # Default to auto if not present?
+        "data": data_cfg_dict, # Use original dicts
+        "training": train_cfg_dict
+    }
+    
+    # Actually, resolve_vocab_size reads 'vocab_size' from model section.
+    # If the TOML 'model' section was merged into merged_config, we might have lost the structure.
+    # We should load 'model' section separately.
+    model_cfg_dict = get_config_section("model")
+    structured_config["model"].update(model_cfg_dict)
+    
+    # Resolve
+    resolved = resolve_vocab_size(structured_config)
+    resolved_vocab_size = resolved["model"].get("vocab_size")
+    
+    # Merge resolved back into flat config if needed, or just set it on ModelConfig
+    if resolved_vocab_size:
+        merged_config["vocab_size"] = resolved_vocab_size
+        model_cfg_dict["vocab_size"] = resolved_vocab_size
+
+    # Create Objects
+    train_config = TrainingConfig.from_dict(merged_config)
+    
+    # For ModelConfig, merge CLI overrides if any? (CLI doesn't usually set dims)
+    # But we should rely on TOML [model] + dynamic logical
+    model_config = ModelConfig.from_dict(model_cfg_dict)
+    
+    return train_config, model_config
+
+def get_model(mode: str, device: str, vocab_size: Optional[int] = None) -> MultiTaskLlama:
     """Initialize the model architecture."""
     # Define architectures
     archs = {
@@ -73,6 +92,11 @@ def get_model(mode: str, device: str) -> MultiTaskLlama:
         mode = "standard"
         
     cfg = archs[mode]
+    
+    if vocab_size is not None:
+        print(f"[Model] Overriding vocab_size {cfg.vocab_size} -> {vocab_size}")
+        cfg.vocab_size = vocab_size
+    
     
     # Base Llama
     model_args = ModelArgs(
@@ -113,38 +137,47 @@ def main():
     args = parser.parse_args()
     
     # 1. Load Configuration
-    config = load_global_config_into_training_config(args)
-    print(f"Loaded Configuration:\n{config}")
+    train_config, model_config = load_global_config_into_training_config(args)
+    print(f"Loaded Configuration:\n{train_config}")
+    print(f"Model Configuration:\n{model_config}")
     
     # 2. Tokenizer
     print("Loading Tokenizer...")
-    tokenizer_path = Path(config.bible_dir) / "tokenizers" / "genesis_8k.json"
-    if not tokenizer_path.exists():
-         print(f"Warning: Tokenizer not found at {tokenizer_path}, checking default location...")
-         # Fallback to absolute path or other logic if needed, but for now just warn
-    
+    try:
+        # Use get_data_path to correctly resolve from config or default
+        tokenizer_path = get_data_path("tokenizer_path")
+        if not tokenizer_path.exists():
+            print(f"Warning: Tokenizer not found at {tokenizer_path}")
+    except Exception as e:
+        # Fallback logic if needed, or crash
+        print(f"Error resolving tokenizer path: {e}")
+        # Legacy fallback
+        tokenizer_path = Path(train_config.bible_dir) / "tokenizers" / "genesis_char_tokenizer.json"
+        
+    print(f"Using tokenizer: {tokenizer_path}")
     tokenizer = GenesisTokenizer(str(tokenizer_path))
     
     # 3. Data Loader
     print("Initializing Data Loader...")
     train_loader = get_multi_task_dataloader(
-        bible_data_dir=config.bible_dir,
+        bible_data_dir=train_config.bible_dir,
         tokenizer=tokenizer,
-        batch_size=config.batch_size,
+        batch_size=train_config.batch_size,
         max_seq_len=1024, # Could be in config
-        device=torch.device(config.device)
+        device=torch.device(train_config.device)
     )
     
     # 4. Model
     print(f"Initializing Model ({args.mode})...")
-    model = get_model(args.mode, config.device)
+    # Pass dynamically resolved vocab size
+    model = get_model(args.mode, train_config.device, vocab_size=model_config.vocab_size)
     
     # 5. Trainer
     trainer = GenesisTrainer(
         model=model,
         tokenizer=tokenizer,
         train_loader=train_loader,
-        config=config
+        config=train_config
     )
     
     # Resume?

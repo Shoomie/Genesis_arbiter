@@ -35,26 +35,6 @@ python run.py
 
 ---
 
-## ⚡ Framework (Jan 2026)
-
-Genesis Arbiter now features modern training infrastructure with three completed phases:
-
-### Phase 1: FlashAttention Integration ✅
-- **3-4x training speedup** via PyTorch SDPA with automatic FlashAttention backend selection
-- Zero code changes to existing checkpoints
-- Training: Driven by `genesis_config.toml` via `run.py`
-
-### Phase 2: Multi-Task Learning ✅  
-- **4 simultaneous objectives**: Language modeling (70%), coherence detection (15%), cross-reference prediction (7.5%), paraphrase detection (7.5%)
-- Leverages **142 Bible translations** from multi-language corpus
-- <10% parameter overhead for task heads
-
-### Phase 3: Grokking Detection ✅
-- **Automated phase transition detection** (memorization → generalization)
-- **Cross-lingual Procrustes alignment** monitoring (gold standard for semantic understanding)
-- **Theological concept clustering** metrics to track emergent structure
-- Research: [`docs/research/grokking_detection_methodology.md`](docs/research/grokking_detection_methodology.md)
-
 **Documentation**: See [`docs/PHASE1_SETUP.md`](docs/PHASE1_SETUP.md) for installation and [`src/genesis/README.md`](src/genesis/README.md) for usage details.
 
 ---

@@ -1,153 +1,74 @@
-# Genesis Engine
+# Genesis Core Engine (`src/genesis`)
 
-This folder contains the core training and inference system for the Genesis Arbiter project, now featuring **FlashAttention**, **multi-task learning**, and **grokking detection**.
+The `genesis` package is the beating heart of the Arbiter project. It contains the complete source code for training, evaluating, and managing the Genesis language models.
 
----
+This directory has been professionalized to follow modern Python package standards, ensuring modularity, type safety, and clear separation of concerns.
 
-## 📂 Contents
+## 🏗️ Architecture Overview
 
-### Training Scripts
+The system is designed around a modular **Trainer-Callback** architecture:
+-   **Trainer (`training/`)**: Handles the training loop, optimization, and state management.
+-   **Models (`models/`)**: Pure PyTorch implementations of the Llama architecture with FlashAttention.
+-   **Pipelines (`pipelines/`)**: High-level orchestration scripts for end-to-end workflows.
+-   **Utils (`utils/`)**: Shared infrastructure for logging, configuration, and checkpoints.
 
-- **`train.py`** - Legacy training script (preserved for backward compatibility)
-- **`train_composer.py`** - ⚡ **NEW**: Composer-based training with FlashAttention (Phase 1)
-- **`train_multi_task.py`** - ⚡ **NEW**: Full multi-task training with grokking detection (Phase 2-3)
-- **`verify_phase1.py`** - Verification script for FlashAttention integration
+## 📂 Directory Structure
 
-### Core Data
-- **`nwt_corpus.txt`**: New World Translation corpus (1,004,926 tokens)
-- **`genesis_tokenizer.json`**: BPE tokenizer with specialized "Jehovah" token
+```text
+src/genesis/
+├── models/                 # Neural network architectures
+│   ├── llama/              # Core Transformer implementation (FlashAttention)
+│   └── multi_task.py       # Multi-task heads wrapper
+├── datasets/               # Data ingestion
+│   └── multi_task.py       # Weighted sampling & data loading
+├── training/               # Training Loop & Logic
+│   ├── trainer.py          # Modular GenesisTrainer class
+│   ├── scheduler.py        # Learning rate scheduling
+│   └── callbacks/          # Grokking detection & monitoring
+├── pipelines/              # Orchestration Workflows
+│   ├── long_pipeline.py    # Auto-resume long-term training
+│   ├── quick_eval.py       # < 1 hour checkpoint assessments
+│   └── sweep.py            # Hyperparameter sweep orchestrator
+├── evaluation/             # Evaluation Suites
+│   └── procedural.py       # Sub-morphemic alignment tests
+├── utils/                  # Shared Utilities
+│   ├── logger.py           # SQLite + TensorBoard logging
+│   └── config_loader.py    # TOML configuration parser
+├── train.py                # 🚀 Main Training Entry Point
+└── verify.py               # 🔍 System Verification Script
+```
 
-### Directories
+## 🔑 Key Components
 
-#### `models/` - Model Architectures
-- `llama/model.py` - Micro-Llama with RoPE, SwiGLU, DeepNorm, **FlashAttention via SDPA**
-- `multi_task_wrapper.py` - ⚡ **NEW**: Multi-task wrapper with 4 task heads
-- `tokenizer.py` - GenesisTokenizer wrapper
+### 1. Training Engine (`train.py` & `training/`)
+The standard entry point for all training jobs is `train.py`. It uses the `GlobalConfig` pattern to load settings from `genesis_config.toml`.
+-   **Usage**: Executed via the root `run.py` (Option 1).
+-   **Modular Design**: The loop logic is decoupled into `GenesisTrainer`, allowing for easy extension.
 
-#### `datasets/` - Data Loading
-- `bible.py` - BibleDataset with blocked loading
-- `multi_task_sampler.py` - ⚡ **NEW**: Multi-task sampling from 142 Bible translations
+### 2. Pipelines (`pipelines/`)
+Automated workflows that combine training and evaluation.
+-   **Long Pipeline**: Runs for days/weeks, handling crashes and auto-resuming.
+-   **Sweep**: Distributed hyperparameter search.
+-   **Quick Eval**: Rapid "Go/No-Go" assessment of checkpoints.
 
-#### `training/` - ⚡ **NEW** Training Infrastructure
-- `flash_attention_config.py` - FlashAttention utilities and benchmarking
-- `callbacks/grokking.py` - Grokking detection, Procrustes alignment, concept clustering
+### 3. Models (`models/`)
+A highly optimized, FlashAttention-enabled implementation of Llama.
+-   **`models.llama`**: The base Transformer.
+-   **`models.multi_task_wrapper`**: Adds heads for auxiliary tasks (Coherence, Reference, Paraphrase).
 
-#### `components/` - Training Utilities
-- `checkpoint.py` - Model saving/loading
-- `optimizer.py` - AdamW configuration
+### 4. Utilities (`utils/`)
+Infrastructure code used across the project.
+-   **`ArbiterLogger`**: A unified logger that writes to both a structured SQLite database (for analysis) and TensorBoard (for real-time monitoring).
 
-#### `train_configs/` - Hardware Configurations
-- `local_4070.toml` - RTX 4070 (12GB VRAM)
-- `t2000_low_vram.toml` - Quadro T2000 (4GB VRAM)
+## 👩‍💻 Development Guidelines
 
----
+-   **Imports**: Always use relative imports within the package (e.g., `from ..utils import logger`) and absolute imports for verifying scripts.
+-   **Configuration**: Do not hardcode parameters. Retrieve them via `get_config_section("section_name")` from `utils/config_loader.py`.
+-   **Type Hinting**: All new function signatures must be fully type-hinted.
 
 ## 🚀 Quick Start
+To verify the integrity of the source installation, run:
 
-### Option 1: Legacy Training (Backward Compatible)
-```powershell
-python train.py
+```bash
+python src/genesis/verify.py
 ```
-
-### Option 2: FlashAttention Training (3-4x Faster)
-```powershell
-python train_composer.py --mode deep_narrow_40 --steps 10000
-```
-
-### Option 3: Multi-Task Training with Grokking Detection
-```powershell
-python train_multi_task.py \
-    --mode deep_narrow_40 \
-    --steps 20000 \
-    --weight-decay 0.15 \
-    --detect-grokking \
-    --bible-dir ../../Bible
-```
-
----
-
-## ⚡ New Features (Jan 2026)
-
-### FlashAttention Integration (Phase 1)
-- **3-4x training speedup** on character-level sequences
-- Automatic backend selection via PyTorch SDPA
-- Zero code changes to existing checkpoints
-- Reduced memory usage for long sequences
-
-**Verification:**
-```powershell
-python verify_phase1.py
-```
-
-### Multi-Task Learning (Phase 2)
-Four task heads trained simultaneously:
-1. **Language Modeling (70%)** - Causal next-token prediction
-2. **Coherence Detection (15%)** - Binary verse coherence classification
-3. **Cross-Reference Prediction (7.5%)** - Triplet loss for semantic similarity
-4. **Cross-Lingual Paraphrase (7.5%)** - Language-invariant embeddings
-
-**Benefits:**
-- More robust representations
-- Leverages 142 Bible translations
-- <10% parameter overhead
-
-### Grokking Detection (Phase 3)
-Automated detection of phase transitions from memorization → generalization:
-- Monitors validation loss over 1000-step windows
-- Detects >10% improvement in <500 steps
-- Auto-saves checkpoints on grokking events
-- Cross-lingual alignment tracking (Procrustes distance)
-- Theological concept clustering analysis
-
-**Documentation:** See `docs/research/grokking_detection_methodology.md`
-
----
-
-## 🏗️ Model Architectures
-
-### Phase 3: Deep & Narrow (Current Focus)
-
-| Architecture | Layers | Dim | Heads | Params | Use Case |
-|-------------|--------|-----|-------|--------|----------|
-| **Deep Narrow 32** | 32 | 640 | 10 | 550M | Budget quick experiments |
-| **Deep Narrow 40** | 40 | 768 | 12 | 800M | Mid-range deep model |
-| **Deep Narrow 48** | 48 | 896 | 14 | 1.0B | 1B sweet spot for grokking |
-| **Deep Narrow 60** | 60 | 768 | 12 | 1.2B | Lighter deep architecture |
-| **Theos-Small** | 80 | 1024 | 16 | 1.8B | Grokking experiments |
-| **Deep Narrow 100** | 100 | 1024 | 16 | 2.3B | Extreme depth reasoning |
-
-All use **DeepNorm** for training stability and **FlashAttention** for efficiency.
-
-### Legacy Architectures (Phase 1-2)
-
-| Architecture | Layers | Dim | Heads | Params | Use Case |
-|-------------|--------|-----|-------|--------|----------|
-| **Microscope** | 12 | 768 | 12 | 125M | Baseline comparisons |
-| **Tower of Truth** | 144 | 288 | 12 | 5-8M | Extreme depth (legacy) |
-| **High-Res Arbiter** | 24 | 1024 | 16 | 180M | Semantic resolution (legacy) |
-
----
-
-## 🔧 Configuration
-
-### Hardware Requirements
-
-| GPU | VRAM | Recommended Model | Batch Size | Notes |
-|-----|------|------------------|------------|-------|
-| RTX 4070 | 12GB | Deep Narrow 40 | 4 | Optimal for development |
-| RTX 4090 | 24GB | Deep Narrow 100 | 8 | Full scale training |
-| Quadro T2000 | 4GB | Microscope | 1 | Gradient checkpointing required |
-
-### Task Distribution (Multi-Task Training)
-
-Default distribution:
-```python
-## 📖 Related Documentation
-
-- **[Quick Reference](../docs/reference/QUICK_REFERENCE.md)**: Project overview
-- **[Theoretical Foundations](../docs/research/theoretical_foundations.md)**: Research motivation
-- **[Implementation Roadmap](../docs/roadmap/README.md)**: Phased development plan
-
----
-
-**Last Updated**: 2026-01-28
