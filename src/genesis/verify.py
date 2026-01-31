@@ -25,15 +25,15 @@ def test_flash_attention_availability():
     config.print_status()
     
     if not config.available and torch.cuda.is_available():
-        print("\n⚠ WARNING: CUDA is available but FlashAttention is not enabled!")
+        print("\n[WARN] WARNING: CUDA is available but FlashAttention is not enabled!")
         print("This is expected if FlashAttention package is not installed.")
         print("Performance gains will be limited to math SDPA fallback.")
         return False
     elif config.available:
-        print("\n✓ FlashAttention is available and will be used automatically")
+        print("\n[OK] FlashAttention is available and will be used automatically")
         return True
     else:
-        print("\n✓ Running on CPU (FlashAttention not applicable)")
+        print("\n[OK] Running on CPU (FlashAttention not applicable)")
         return True
 
 
@@ -71,12 +71,12 @@ def test_model_forward_pass():
     
     try:
         logits, loss = model(tokens, labels)
-        print(f"\n✓ Forward pass successful!")
+        print(f"\n[OK] Forward pass successful!")
         print(f"  Output shape: {logits.shape}")
         print(f"  Loss: {loss.item():.4f}")
         return True
     except Exception as e:
-        print(f"\n✗ Forward pass failed: {e}")
+        print(f"\n[FAIL] Forward pass failed: {e}")
         return False
 
 
@@ -102,7 +102,7 @@ def test_performance_benchmark():
             benchmark_steps=50
         )
         
-        print(f"\n✓ Benchmark complete!")
+        print(f"\n[OK] Benchmark complete!")
         print(f"  Baseline time: {baseline_time:.3f}s")
         print(f"  FlashAttention time: {flash_time:.3f}s")
         
@@ -111,70 +111,29 @@ def test_performance_benchmark():
             print(f"  Speedup: {speedup:.2f}x")
             
             if speedup >= 2.0:
-                print(f"\n✓ Excellent! {speedup:.2f}x speedup achieved")
+                print(f"\n[OK] Excellent! {speedup:.2f}x speedup achieved")
             elif speedup >= 1.5:
-                print(f"\n✓ Good! {speedup:.2f}x speedup achieved")
+                print(f"\n[OK] Good! {speedup:.2f}x speedup achieved")
             elif speedup >= 1.2:
-                print(f"\n⚠ Modest {speedup:.2f}x speedup (expected 2-4x)")
+                print(f"\n[WARN] Modest {speedup:.2f}x speedup (expected 2-4x)")
             else:
-                print(f"\n⚠ Minimal speedup ({speedup:.2f}x) - check FA installation")
+                print(f"\n[WARN] Minimal speedup ({speedup:.2f}x) - check FA installation")
         else:
-            print("\n⚠ FlashAttention not available - using fallback")
+            print("\n[WARN] FlashAttention not available - using fallback")
         
         return True
     except Exception as e:
-        print(f"\n✗ Benchmark failed: {e}")
+        print(f"\n[FAIL] Benchmark failed: {e}")
         return False
 
 
 def test_composer_integration():
-    """Test 4: Verify Composer wrapper works correctly."""
+    """Test 4: Composer Integration (Legacy)."""
     print("\n" + "="*60)
     print("TEST 4: Composer Integration")
     print("="*60)
-    
-    try:
-        from composer import Trainer
-        from genesis.train_composer import GenesisComposerModel
-        from genesis.models.llama.model import Llama
-        
-        print("Creating test model...")
-        base_model = Llama(
-            vocab_size=1000,
-            n_layers=2,
-            dim=128,
-            n_heads=4,
-            intermediate_size=256,
-            max_seq_len=128
-        )
-        
-        composer_model = GenesisComposerModel(base_model)
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Test forward pass
-        batch = {
-            'tokens': torch.randint(0, 1000, (2, 64), device=device),
-            'labels': torch.randint(0, 1000, (2, 64), device=device)
-        }
-        
-        composer_model = composer_model.to(device)
-        outputs = composer_model.forward(batch)
-        loss = composer_model.loss(outputs, batch)
-        
-        print(f"\n✓ Composer integration successful!")
-        print(f"  Loss: {loss.item():.4f}")
-        return True
-        
-    except ImportError as e:
-        print(f"\n⚠ Composer not installed: {e}")
-        print("Run: pip install mosaicml")
-        return False
-    except Exception as e:
-        print(f"\n✗ Composer integration failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    print("Composer training script has been removed. Skipping test.")
+    return True
 
 
 def main():
@@ -195,19 +154,19 @@ def main():
     print("="*60)
     
     for test_name, passed in results.items():
-        status = "✓ PASS" if passed else "✗ FAIL"
+        status = "[OK] PASS" if passed else "[FAIL] FAIL"
         print(f"{status:8} {test_name}")
     
     all_passed = all(results.values())
     
     if all_passed:
-        print(f"\n✓ All tests passed! Phase 1 is complete.")
+        print(f"\n[OK] All tests passed! Phase 1 is complete.")
         print(f"\nNext steps:")
         print(f"  1. Install Composer: pip install mosaicml")
         print(f"  2. Test training: python train_composer.py --mode microscope --steps 100")
         print(f"  3. Compare with legacy: python train.py (same config)")
     else:
-        print(f"\n⚠ Some tests failed. Please review and fix issues before proceeding.")
+        print(f"\n[WARN] Some tests failed. Please review and fix issues before proceeding.")
     
     print("="*60 + "\n")
     

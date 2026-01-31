@@ -23,8 +23,8 @@ from dataclasses import dataclass
 
 # Import our modules
 try:
-    from .arbiter_logger import ArbiterLogger
-    from .arbiter_quick_eval import ArbiterQuickEval
+    from ..utils.logger import ArbiterLogger
+    from .quick_eval import ArbiterQuickEval
     
     # Tools are imported as absolute from the root if root added to PYTHONPATH, 
     # or we can use relative if they were in the same package.

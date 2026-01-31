@@ -244,7 +244,7 @@ def main():
             if sys_cfg.get("gradient_checkpointing"): args.append("--gradient-checkpointing")
             
             print(f"\n{Colors.CYAN}Starting {desc} (Global Config: genesis_config.toml)...{Colors.ENDC}")
-            run_script('src/genesis/train_native_multi_task.py', desc, args=args)
+            run_script('src/genesis/train.py', desc, args=args)
         
         elif choice == '2a':
             config = load_genesis_config()
@@ -288,16 +288,16 @@ def main():
             open_documentation('docs/roadmap/README.md')
         
         elif choice == '5a':
-            run_script('src/genesis/verify_phase1.py', 'Verifying FlashAttention Setup')
+            run_script('src/genesis/verify.py', 'Verifying FlashAttention Setup')
         
         elif choice == '5b':
-            run_script('src/genesis/arbiter_quick_eval.py', 'Running Quick Evaluation')
+            run_script('src/genesis/pipelines/quick_eval.py', 'Running Quick Evaluation')
         
         elif choice == '5c':
-            run_script('src/genesis/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
+            run_script('src/genesis/pipelines/long_pipeline.py', 'Launching Long Training Pipeline')
         
         elif choice == '5d':
-            run_script('src/genesis/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
+            run_script('src/genesis/pipelines/sweep.py', 'Starting Parameter Sweep')
         
         elif choice == '5e':
             run_script('tools/arbiter_data_augmentor.py', 'Generating Augmented Data')
