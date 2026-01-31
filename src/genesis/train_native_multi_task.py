@@ -1,13 +1,8 @@
 """
-Native PyTorch Multi-Task Training with Grokking Detection
-===========================================================
-Replaces train_multi_task.py with pure PyTorch implementation.
-
-Features:
-- Multi-task learning (LM, coherence, cross-ref, paraphrase)
-- Grokking detection callbacks
-- PyTorch SDPA (FlashAttention when available)
-- Cross-lingual validation
+Genesis Multi-Task Master Trainer
+=================================
+Consolidated training engine for the Genesis Arbiter project.
+Integrates Multi-Task Learning, FlashAttention, and Grokking Detection.
 """
 
 import os
@@ -24,6 +19,7 @@ from datetime import timedelta
 import toml
 
 # Core imports
+from .config import get_config_section, get_data_path
 from .models.multi_task_wrapper import MultiTaskLlama
 from .models.tokenizer import GenesisTokenizer
 from .datasets.multi_task_sampler import get_multi_task_dataloader
@@ -84,35 +80,44 @@ CONFIG = {
 def load_central_config():
     """Load settings from genesis_config.toml at project root."""
     try:
-        # Find project root (3 levels up from this file)
-        root = Path(__file__).parent.parent.parent
-        config_path = root / "genesis_config.toml"
-        if config_path.exists():
-            central_cfg = toml.load(config_path)
-            train_cfg = central_cfg.get("training", {})
+        # Use our centralized config loader
+        train_cfg = get_config_section("training")
+        eval_cfg = get_config_section("evaluation")
+        sys_cfg = get_config_section("system")
+        data_cfg = get_config_section("data")
+
+        # 1. Training Section
+        train_mapping = {
+            "mode": "MODE",
+            "learning_rate": "LEARNING_RATE",
+            "weight_decay": "WEIGHT_DECAY",
+            "max_steps": "MAX_STEPS",
+            "batch_size": "BATCH_SIZE",
+            "grad_accum_steps": "GRAD_ACCUM_STEPS"
+        }
+        for k, v in train_mapping.items():
+            if k in train_cfg: CONFIG[v] = train_cfg[k]
+        
+        # 2. Evaluation Section
+        eval_mapping = {
+            "val_interval": "VAL_INTERVAL",
+            "log_interval": "LOG_INTERVAL",
+            "eval_interval": "EVAL_INTERVAL",
+            "detect_grokking": "DETECT_GROKKING",
+            "eval_recon_samples": "EVAL_RECON_SAMPLES",
+            "eval_aux_samples": "EVAL_AUX_SAMPLES"
+        }
+        for k, v in eval_mapping.items():
+            if k in eval_cfg: CONFIG[v] = eval_cfg[k]
             
-            # Map central to local keys
-            mapping = {
-                "mode": "MODE",
-                "learning_rate": "LEARNING_RATE",
-                "weight_decay": "WEIGHT_DECAY",
-                "max_steps": "MAX_STEPS",
-                "batch_size": "BATCH_SIZE",
-                "grad_accum_steps": "GRAD_ACCUM_STEPS",
-                "save_interval": "SAVE_INTERVAL",
-                "log_interval": "LOG_INTERVAL",
-                "val_interval": "VAL_INTERVAL",
-                "eval_interval": "EVAL_INTERVAL",
-                "detect_grokking": "DETECT_GROKKING",
-                "verbose_logging": "VERBOSE_LOGGING",
-                "bible_dir": "BIBLE_DIR"
-            }
-            
-            for central_key, local_key in mapping.items():
-                if central_key in train_cfg:
-                    CONFIG[local_key] = train_cfg[central_key]
-            
-            return True
+        # 3. System Section
+        if "verbose_logging" in sys_cfg: CONFIG["VERBOSE_LOGGING"] = sys_cfg["verbose_logging"]
+        if "precision" in sys_cfg: CONFIG["PRECISION"] = sys_cfg["precision"]
+        
+        # 4. Data Section
+        if "bible_dir" in data_cfg: CONFIG["BIBLE_DIR"] = data_cfg["bible_dir"]
+        
+        return True
     except Exception as e:
         print(f"[WARN] Failed to load central config: {e}")
     return False
@@ -786,7 +791,7 @@ def train_multi_task(
                     start_time = time.time()
                 
                 # Extensive Evaluation
-                if global_step % eval_interval == 0:
+                if eval_interval > 0 and global_step % eval_interval == 0:
                     print(f"\n[EVAL] Running extensive procedural evaluation at step {global_step}...")
                     eval_results = evaluator.run_suite(
                         use_amp=use_amp, 

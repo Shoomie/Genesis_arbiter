@@ -36,6 +36,8 @@ current_dir = Path(__file__).parent.absolute()
 project_root = current_dir.parent
 sys.path.append(str(project_root / "src"))
 
+# Genesis Imports
+from genesis.config import get_config_section
 from genesis.models.tokenizer import GenesisTokenizer
 from genesis.models.llama.model import Llama
 from genesis.models.multi_task_wrapper import MultiTaskLlama
@@ -247,28 +249,19 @@ def generate_response(model, tokenizer, prompt, device, max_new_tokens=300, temp
 
 def load_central_config():
     """Load settings from genesis_config.toml at project root."""
-    try:
-        # Find project root (1 level up from this file's folder tools/)
-        root = Path(__file__).parent.parent
-        config_path = root / "genesis_config.toml"
-        if config_path.exists():
-            return toml.load(config_path)
-    except Exception as e:
-        print(f"[WARN] Failed to load central config: {e}")
-    return {}
+    return get_config_section("inference")
 
 def main(initial_temp=None, initial_max_tokens=None, force_device=None):
     """Main interaction loop."""
     print_header()
     
     # Load central config for defaults
-    central_cfg = load_central_config()
-    interact_cfg = central_cfg.get("interaction", {})
+    interact_cfg = load_central_config()
     
     # 1. Device Setup
     if force_device:
         device = torch.device(force_device)
-    elif "device" in interact_cfg and interact_cfg["device"] != "auto":
+    elif "device" in interact_cfg and interact_cfg["device"] != "auto" and interact_cfg["device"] is not None:
         device = torch.device(interact_cfg["device"])
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

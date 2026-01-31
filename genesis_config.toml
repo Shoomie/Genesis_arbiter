@@ -1,43 +1,88 @@
 # ============================================================================
-# GENESIS ARBITER - Central Configuration
+# GENESIS ARBITER - Global Project Configuration
 # ============================================================================
-# This file is the single source of truth for major project parameters.
-# Changes here affect run_script calls from run.py.
+# This file is the single source of truth for the entire repository.
+# Prioritized by Research Workflow: Inference -> Training -> Systems.
+
+[inference]
+# Device: "auto" (detects CUDA), "cuda", or "cpu"
+device = "auto"
+
+# Generation Control
+max_tokens = 100
+temperature = 0.8
+top_k = 40
+top_p = 0.9
+repetition_penalty = 1.1
+
+# UX Settings
+stream_output = true
+show_probs = false
+stop_sequences = ["\n\n\n"]
 
 [training]
-# Model preset to use
+# Default training preset ("microscope", "deep_narrow_40", "deep_narrow_48")
 mode = "microscope"
 
-# Training hyperparameters
+# Optimization Parameters
 learning_rate = 1e-4
 weight_decay = 0.08
 max_steps = 30000
 batch_size = 1024
 grad_accum_steps = 1
+lr_schedule = "cosine"
+warmup_steps = 2000
+min_lr_ratio = 0.1
 
-# Monitoring intervals (steps)
+# Checkpoint Control
 save_interval = 2000
-log_interval = 100
+resume = true
+autoresume_best = true
+
+[model]
+# Default architecture (if not using a preset mode)
+dim = 512
+n_layers = 12
+n_heads = 8
+intermediate_size = 2048
+norm_type = "deepnorm"
+max_seq_len = 512
+
+[data]
+# Source directories (root-relative)
+bible_dir = "Bible"
+corpus_path = "data/nwt_corpus.txt"
+
+# Generated artifacts
+tokenizer_path = "data/genesis_char_tokenizer.json"
+cache_path = "data/genesis_data_cache.pt"
+
+# Sampling settings
+max_seq_len = 512
+target_languages = []  # Empty for all languages
+
+[evaluation]
+# Operational Intervals (steps)
 val_interval = 500
+log_interval = 100
 eval_interval = 1000
 
-# Advanced features
+# Probe depth
+eval_recon_samples = 50
+eval_aux_samples = 20
+
+# Features
 detect_grokking = true
+
+[system]
+# Precision: "fp32", "fp16", "bf16", "int8", "int4"
+precision = "bf16"
+
+# Performance Flags
+compile_model = false
+gradient_checkpointing = true
+cpu_data = false
 verbose_logging = true
 
-# Path to Bible data (root-relative)
-bible_dir = "Bible"
-
-[interaction]
-# Device selection: "auto", "cuda", or "cpu"
-device = "auto"
-
-# Generation parameters
-max_tokens = 100
-temperature = 0.8
-top_k = 40
-top_p = 0.9
-
-# Inference settings
-stream_output = true
-show_probs = false
+# Environment
+use_libuv = "0"

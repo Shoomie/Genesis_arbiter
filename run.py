@@ -63,18 +63,18 @@ def print_menu():
     print(f"{Colors.BOLD}Main Menu:{Colors.ENDC}\n")
     
     print(f"{Colors.GREEN}[1]{Colors.ENDC} {Colors.BOLD}Train Model{Colors.ENDC}")
-    print("    - [1a] FlashAttention Training (3-4x faster)")
-    print("    - [1b] Multi-Task Training (with grokking detection)\n")
+    print("    - [1a] Standard training (Fast)")
+    print("    - [1b] Full evaluation training\n")
     
-    print(f"{Colors.GREEN}[2]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
-    print("    - [2a] Count unique words")
-    print("    - [2b] Count logical connectives")
-    print("    - [2c] Pre-process Data (Create Training Data Cache File)\n")
+    print(f"{Colors.GREEN}[2]{Colors.ENDC} {Colors.BOLD}Evaluation & Testing{Colors.ENDC}")
+    print("    - [2a] Interactive Checkpoint Chat")
+    print("    - [2b] Run friction stress test")
+    print("    - [2c] Calculate perplexity\n")
     
-    print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Evaluation & Testing{Colors.ENDC}")
-    print("    - [3a] Calculate perplexity")
-    print("    - [3b] Run friction stress test")
-    print("    - [3c] Interactive Checkpoint Chat\n")
+    print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
+    print("    - [3a] Count unique words")
+    print("    - [3b] Count logical connectives")
+    print("    - [3c] Pre-process Data (Create Training Data Cache File)\n")
     
     print(f"{Colors.GREEN}[4]{Colors.ENDC} {Colors.BOLD}Documentation{Colors.ENDC}")
     print("    - [4a] Quick Reference Guide")
@@ -83,7 +83,7 @@ def print_menu():
     print("    - [4d] Grokking Detection Methodology")
     print("    - [4e] Research Roadmap\n")
     
-    print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation{Colors.ENDC}")
+    print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation (under construction){Colors.ENDC}")
     print("    - [5a] Verify FlashAttention Setup")
     print("    - [5b] Quick Evaluation")
     print("    - [5c] Long Training Pipeline")
@@ -217,42 +217,38 @@ def main():
         
         choice = input(f"{Colors.BOLD}Select an option: {Colors.ENDC}").strip().lower()
         
-        if choice == '1a':
-            run_script('src/genesis/train_flash.py', 'Launching FlashAttention Training (Native PyTorch)')
-        
-        elif choice == '1b':
+        if choice in ['1a', '1b']:
             config = load_genesis_config()
             train_cfg = config.get("training", {})
+            sys_cfg = config.get("system", {})
+            eval_cfg = config.get("evaluation", {})
             
             # Map config to command line arguments
-            args = ["--resume"]
+            args = []
+            if train_cfg.get("resume", True): args.append("--resume")
             if "mode" in train_cfg: args.extend(["--mode", train_cfg["mode"]])
             if "batch_size" in train_cfg: args.extend(["--batch-size", str(train_cfg["batch_size"])])
             if "learning_rate" in train_cfg: args.extend(["--lr", str(train_cfg["learning_rate"])])
             if "max_steps" in train_cfg: args.extend(["--steps", str(train_cfg["max_steps"])])
-            if "val_interval" in train_cfg: args.extend(["--val-interval", str(train_cfg["val_interval"])])
+            if "val_interval" in eval_cfg: args.extend(["--val-interval", str(eval_cfg["val_interval"])])
             
-            print(f"\n{Colors.CYAN}Starting training (Config: genesis_config.toml)...{Colors.ENDC}")
-            run_script('src/genesis/train_native_multi_task.py', 'Training (Native PyTorch)', args=args)
+            if choice == '1a':
+                # Disable extensive evaluation for 1a
+                args.extend(["--eval-interval", "0"])
+                desc = 'Standard training (Fast)'
+            else:
+                if "eval_interval" in eval_cfg: args.extend(["--eval-interval", str(eval_cfg["eval_interval"])])
+                desc = 'Full evaluation training'
+
+            if sys_cfg.get("compile_model"): args.append("--compile")
+            if sys_cfg.get("gradient_checkpointing"): args.append("--gradient-checkpointing")
+            
+            print(f"\n{Colors.CYAN}Starting {desc} (Global Config: genesis_config.toml)...{Colors.ENDC}")
+            run_script('src/genesis/train_native_multi_task.py', desc, args=args)
         
         elif choice == '2a':
-            run_script('tools/count_unique_words.py', 'Analyzing Corpus Vocabulary')
-        
-        elif choice == '2b':
-            run_script('tools/count_logical_connectives.py', 'Counting Logical Connectives')
-        
-        elif choice == '2c':
-            run_script('tools/update_data_cache.py', 'Updating VRAM Data Cache')
-        
-        elif choice == '3a':
-            run_script('tools/arbiter_perplexity.py', 'Calculating Model Perplexity')
-        
-        elif choice == '3b':
-            run_script('tools/friction_stress_test.py', 'Running Friction Stress Test')
-            
-        elif choice == '3c':
             config = load_genesis_config()
-            interact_cfg = config.get("interaction", {})
+            interact_cfg = config.get("inference", {})
             
             args = []
             if "device" in interact_cfg: args.extend(["--device", interact_cfg["device"]])
@@ -260,6 +256,21 @@ def main():
             if "max_tokens" in interact_cfg: args.extend(["--max-tokens", str(interact_cfg["max_tokens"])])
             
             run_script('tools/interact_with_checkpoint.py', 'Interactive Checkpoint Chat', args=args)
+            
+        elif choice == '2b':
+            run_script('tools/friction_stress_test.py', 'Running Axiomatic Friction Stress Test')
+            
+        elif choice == '2c':
+            run_script('tools/arbiter_perplexity.py', 'Calculating Perplexity on Contrastive Datasets')
+            
+        elif choice == '3a':
+            run_script('tools/count_unique_words.py', 'Analyzing Corpus Vocabulary')
+            
+        elif choice == '3b':
+            run_script('tools/count_logical_connectives.py', 'Analyzing Logical Connectives in Dataset')
+            
+        elif choice == '3c':
+            run_script('tools/update_data_cache.py', 'Updating VRAM Data Cache')
         
         elif choice == '4a':
             open_documentation('docs/reference/QUICK_REFERENCE.md')

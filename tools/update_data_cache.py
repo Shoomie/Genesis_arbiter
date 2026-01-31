@@ -10,6 +10,10 @@ import os
 import sys
 from pathlib import Path
 import torch
+import toml
+
+# Genesis Imports
+from genesis.config import get_data_path, find_project_root
 
 # Add src to path
 current_dir = Path(__file__).parent.absolute()
@@ -22,13 +26,16 @@ from genesis.datasets.multi_task_sampler import process_and_save_cache
 def main():
     print(">>> Genesis Data Cache Updater\n")
     
-    # Configuration
-    bible_dir = project_root.parent / "Bible"
-    if not bible_dir.exists():
-        bible_dir = project_root / "Bible"
-        
-    cache_path = project_root / "data" / "genesis_data_cache.pt"
-    tokenizer_path = project_root / "data" / "genesis_char_tokenizer.json"
+    # 1. Resolve paths using central config/defaults
+    try:
+        project_root = find_project_root()
+        bible_dir = get_data_path("bible_dir", "Bible", project_root)
+        cache_path = get_data_path("cache_path", "data/genesis_data_cache.pt", project_root)
+        tokenizer_path = get_data_path("tokenizer_path", "data/genesis_char_tokenizer.json", project_root)
+        print(f"[CONFIG] Integrated paths from global configuration")
+    except Exception as e:
+        print(f"[ERROR] Path resolution failed: {e}")
+        return
     
     print(f"Bible Directory: {bible_dir}")
     print(f"Cache Output:    {cache_path}")

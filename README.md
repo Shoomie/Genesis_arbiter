@@ -28,10 +28,10 @@ python run.py
 
 ## 🎯 Project Mission
 
-**Primary Objective**: Train 2B-parameter "Deep & Narrow" transformers exclusively on the Bible (~1M tokens) to demonstrate that:
-- **Depth substitutes for volume**: 80-144 layer models can develop reasoning without trillion-token datasets
+**Primary Objective**: Train transformers exclusively on the Bible to demonstrate that:
+- **Depth substitutes for volume**: Models can develop reasoning without trillion-token datasets
 - **Extended training induces phase transitions**: Grokking enables generalization beyond memorization
-- **Corpus-specific optimization maximizes signal**: Custom tokenizers and multi-task objectives extract latent structure
+- **Training integrated learning of complete semantics maximizes signal**: Character-level tokenizers and multi-task objectives extract latent structure
 
 ---
 
@@ -64,9 +64,9 @@ Genesis Arbiter now features modern training infrastructure with three completed
 ```text
 Genesis_arbiter/
 ├── run.py                          # 🎮 Central menu system (START HERE!)
-├── genesis_config.toml             # ⚙️ Central configuration (Single source of truth)
+├── genesis_config.toml             # ⚙️ Central configuration
 ├── README.md                       # Project overview
-├── data/                           # 📂 Data assets (Tokenizers, Corpus, Caches)
+├── data/                           # 📂 Data assets (Tokenizers, Caches)
 ├── src/                            # 🏗️ Source code (Genesis package)
 ├── tools/                          # 🛠️ Utility scripts & analysis tools
 ├── project_doc/                    # 📄 Core project documentation (Legal, Contribution)
@@ -89,21 +89,6 @@ All core parameters are managed in **`genesis_config.toml`**. To adjust training
 The project uses a unified configuration system:
 - **`[training]`**: Control learning rates, batch sizes, and model modes.
 - **`[interaction]`**: Adjust temperature and generation limits for model chatting.
-
----
-
-## 🏗️ Model Architectures
-
-### Deep & Narrow Topologies (Current Focus)
-
-| Architecture | Layers | Dim | Heads | Params | Primary Use Case |
-|-------------|--------|-----|-------|--------|-----------------|
-| **Deep Narrow 32** | 32 | 640 | 10 | 550M | Budget experiments |
-| **Deep Narrow 40** | 40 | 768 | 12 | 800M | Development baseline |
-| **Deep Narrow 48** | 48 | 896 | 14 | 1.0B | Grokking sweet spot |
-| **Deep Narrow 60** | 60 | 768 | 12 | 1.2B | Extended depth |
-| **Theos-Small** | 80 | 1024 | 16 | 1.8B | Grokking experiments |
-| **Deep Narrow 100** | 100 | 1024 | 16 | 2.3B | Extreme depth reasoning |
 
 ---
 
