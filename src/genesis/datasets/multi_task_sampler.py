@@ -113,6 +113,8 @@ class MultiTaskDataset(Dataset):
                         print(f"  [FILTERED] Dataset reduced to {len(self.verse_indices)} verses ({found_langs} languages)")
                     else:
                         print(f"  [WARN] None of the target languages found in cache. Using full dataset.")
+                
+                loaded_from_cache = True
 
 
 
@@ -715,7 +717,7 @@ def get_multi_task_dataloader(
 
 if __name__ == "__main__":
     # Test the dataset
-    from models.tokenizer import GenesisTokenizer
+    from ..models.tokenizer import GenesisTokenizer
     
     print("Testing multi-task dataset...")
     

@@ -10,11 +10,9 @@ Tests:
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
 import torch
 import torch.nn.functional as F
-from training.flash_attention_config import FlashAttentionConfig, benchmark_attention
+from genesis.training.flash_attention_config import FlashAttentionConfig, benchmark_attention
 
 
 def test_flash_attention_availability():
@@ -45,7 +43,7 @@ def test_model_forward_pass():
     print("TEST 2: Model Forward Pass with SDPA")
     print("="*60)
     
-    from models.llama.model import Llama
+    from genesis.models.llama.model import Llama
     
     # Create small test model
     model = Llama(
@@ -137,8 +135,8 @@ def test_composer_integration():
     
     try:
         from composer import Trainer
-        from train_composer import GenesisComposerModel
-        from models.llama.model import Llama
+        from genesis.train_composer import GenesisComposerModel
+        from genesis.models.llama.model import Llama
         
         print("Creating test model...")
         base_model = Llama(

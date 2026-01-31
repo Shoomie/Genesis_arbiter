@@ -30,11 +30,11 @@ except ImportError:
     exit(1)
 
 # Core imports
-from models.llama.model import Llama
-from models.tokenizer import GenesisTokenizer
-from datasets.bible import get_bible_dataloader
-from components.checkpoint import save_checkpoint
-from training.flash_attention_config import FlashAttentionConfig
+from .models.llama.model import Llama
+from .models.tokenizer import GenesisTokenizer
+from .datasets.bible import get_bible_dataloader
+from .components.checkpoint import save_checkpoint
+from .training.flash_attention_config import FlashAttentionConfig
 
 
 class GenesisComposerModel(ComposerModel):
@@ -249,11 +249,11 @@ def find_tokenizer(vocab_size: int = 8192):
             # For now, fall back to GenesisTokenizer
     
     # Fallback to genesis tokenizer
-    if Path("genesis_tokenizer.json").exists():
-        print(f"Using genesis_tokenizer.json (legacy)")
-        return GenesisTokenizer("genesis_tokenizer.json")
+    if Path("data/genesis_char_tokenizer.json").exists():
+        print(f"Using data/genesis_char_tokenizer.json")
+        return GenesisTokenizer("data/genesis_char_tokenizer.json")
     
-    raise FileNotFoundError("No tokenizer found. Run 'python ../scripts/arbiter_tokenizer_factory.py nwt_corpus.txt'")
+    raise FileNotFoundError("No tokenizer found. Run 'python ../tools/arbiter_tokenizer_factory.py nwt_corpus.txt'")
 
 
 def train():
@@ -363,7 +363,7 @@ def train():
     # Create dataloader
     print(f"\n>>> Loading dataset...")
     train_dataloader = get_bible_dataloader(
-        corpus_path="nwt_corpus.txt",
+        corpus_path="data/nwt_corpus.txt",
         tokenizer=tokenizer,
         batch_size=args.batch_size,
         max_seq_len=model_cfg.get("max_seq_len", 1024)

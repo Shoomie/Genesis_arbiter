@@ -23,11 +23,11 @@ import time
 from datetime import timedelta
 
 # Core imports
-from models.llama.model import Llama
-from models.tokenizer import GenesisTokenizer
-from components.checkpoint import save_checkpoint
-from datasets.bible import get_bible_dataloader
-from training.flash_attention_config import (
+from .models.llama.model import Llama
+from .models.tokenizer import GenesisTokenizer
+from .components.checkpoint import save_checkpoint
+from .datasets.bible import get_bible_dataloader
+from .training.flash_attention_config import (
     is_flash_attention_available,
     print_flash_attention_status
 )
@@ -252,7 +252,7 @@ def train(
     
     # Initialize tokenizer
     print("Loading tokenizer...")
-    tokenizer = GenesisTokenizer("genesis_tokenizer.json")
+    tokenizer = GenesisTokenizer("data/genesis_char_tokenizer.json")
     print(f"  Vocab size: {tokenizer.vocab_size}")
     
     # Initialize model
@@ -298,7 +298,7 @@ def train(
     # Initialize dataloader
     print("\nInitializing dataloader...")
     dataloader = get_bible_dataloader(
-        corpus_path="nwt_corpus.txt",
+        corpus_path="data/nwt_corpus.txt",
         tokenizer=tokenizer,
         batch_size=batch_size,
         max_seq_len=512

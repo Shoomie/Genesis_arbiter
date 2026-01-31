@@ -5,15 +5,14 @@ from pathlib import Path
 from collections import Counter
 import unicodedata
 
-# Add parent directory to path for imports
+# Add src directory to path for imports
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
-engine_dir = os.path.join(parent_dir, "engine")
-for d in [parent_dir, engine_dir]:
-    if d not in sys.path:
-        sys.path.insert(0, d)
+src_dir = os.path.join(parent_dir, "src")
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
-from models.tokenizer import GenesisTokenizer
+from genesis.models.tokenizer import GenesisTokenizer
 
 # Ensure UTF-8 output for Windows console
 if sys.stdout.encoding != 'utf-8':
@@ -135,10 +134,10 @@ def analyze_dataset(tokenizer_path):
 
 if __name__ == "__main__":
     # Ensure we use the latest tokenizer
-    tokenizer_file = "genesis_tokenizer.json"
+    tokenizer_file = os.path.join(parent_dir, "data", "genesis_char_tokenizer.json")
     if not os.path.exists(tokenizer_file):
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        alt_path = os.path.join(parent_dir, "engine", "genesis_tokenizer.json")
+        # Fallback to standard location
+        alt_path = os.path.join(parent_dir, "genesis_tokenizer.json")
         if os.path.exists(alt_path):
             tokenizer_file = alt_path
         elif os.path.exists("genesis_char_tokenizer.json"):

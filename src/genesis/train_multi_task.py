@@ -22,12 +22,13 @@ from composer.loggers import TensorBoardLogger
 from composer.core import DataSpec
 
 # Genesis Arbiter
-from models.llama.model import Llama
-from models.tokenizer import GenesisTokenizer
-from models.multi_task_wrapper import MultiTaskLlama
-from datasets.multi_task_sampler import get_multi_task_dataloader
-from training.flash_attention_config import FlashAttentionConfig
-from training.callbacks.grokking import GrokkingCallback, ProcrustesCallback, ConceptClusteringCallback
+# Core imports
+from genesis.models.llama.model import Llama
+from genesis.models.tokenizer import GenesisTokenizer
+from genesis.models.multi_task_wrapper import MultiTaskLlama
+from genesis.datasets.multi_task_sampler import get_multi_task_dataloader
+from genesis.training.flash_attention_config import FlashAttentionConfig
+from genesis.training.callbacks.grokking import GrokkingCallback, ProcrustesCallback, ConceptClusteringCallback
 from train_composer import GenesisComposerModel, get_protocol_config, find_tokenizer
 
 

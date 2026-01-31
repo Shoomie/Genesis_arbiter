@@ -1,0 +1,43 @@
+# ============================================================================
+# GENESIS ARBITER - Central Configuration
+# ============================================================================
+# This file is the single source of truth for major project parameters.
+# Changes here affect run_script calls from run.py.
+
+[training]
+# Model preset to use
+mode = "microscope"
+
+# Training hyperparameters
+learning_rate = 1e-4
+weight_decay = 0.08
+max_steps = 30000
+batch_size = 1024
+grad_accum_steps = 1
+
+# Monitoring intervals (steps)
+save_interval = 2000
+log_interval = 100
+val_interval = 500
+eval_interval = 1000
+
+# Advanced features
+detect_grokking = true
+verbose_logging = true
+
+# Path to Bible data (root-relative)
+bible_dir = "Bible"
+
+[interaction]
+# Device selection: "auto", "cuda", or "cpu"
+device = "auto"
+
+# Generation parameters
+max_tokens = 100
+temperature = 0.8
+top_k = 40
+top_p = 0.9
+
+# Inference settings
+stream_output = true
+show_probs = false

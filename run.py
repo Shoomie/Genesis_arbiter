@@ -8,6 +8,7 @@ A unified interface for all Genesis project functionality.
 import os
 import sys
 import subprocess
+import toml
 from pathlib import Path
 
 # ANSI color codes for terminal styling
@@ -21,6 +22,17 @@ class Colors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
+def load_genesis_config():
+    """Load central configuration from genesis_config.toml."""
+    config_path = Path(__file__).parent / "genesis_config.toml"
+    if not config_path.exists():
+        return {}
+    try:
+        return toml.load(config_path)
+    except Exception as e:
+        print(f"\033[91m[!] Error loading genesis_config.toml: {e}\033[0m")
+        return {}
 
 def clear_screen():
     """Clear the terminal screen."""
@@ -91,17 +103,28 @@ def run_script(script_path, description, args=None):
         args = []
         
     try:
-        # Change to script directory for relative imports, but keep full path for execution if needed
+        # Change to script directory for relative imports
         script_dir = os.path.dirname(script_path)
         script_name = os.path.basename(script_path)
         
+        # Add 'src' and root to PYTHONPATH so 'from genesis.xxx' and 'from tools.xxx' work
+        env = os.environ.copy()
+        project_root_str = str(Path(__file__).parent.absolute())
+        src_path = str(Path(__file__).parent.absolute() / "src")
+        
+        python_path = f"{src_path}{os.pathsep}{project_root_str}"
+        if "PYTHONPATH" in env:
+            env["PYTHONPATH"] = f"{python_path}{os.pathsep}{env['PYTHONPATH']}"
+        else:
+            env["PYTHONPATH"] = python_path
+
         # Prepare command
         if script_dir:
             cmd = [sys.executable, script_name] + args
-            subprocess.run(cmd, cwd=script_dir, check=True)
+            subprocess.run(cmd, cwd=script_dir, check=True, env=env)
         else:
             cmd = [sys.executable, script_path] + args
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=env)
             
     except subprocess.CalledProcessError as e:
         print(f"\n{Colors.RED}[X] Error: Script exited with code {e.returncode}{Colors.ENDC}")
@@ -143,19 +166,19 @@ def show_project_info():
     print(f"{Colors.BOLD}[Stats] Project Statistics{Colors.ENDC}\n")
     
     # Count files and directories
-    engine_files = sum(1 for _ in Path('engine').rglob('*.py'))
-    doc_files = sum(1 for _ in Path('docs').rglob('*.md'))
-    script_files = sum(1 for _ in Path('scripts').rglob('*.py'))
+    engine_files = sum(1 for _ in Path('src/genesis').rglob('*.py'))
+    doc_files = sum(1 for _ in Path('docs').rglob('*.md')) + sum(1 for _ in Path('project_doc').rglob('*.md'))
+    script_files = sum(1 for _ in Path('tools').rglob('*.py'))
     
-    print(f"  {Colors.CYAN}Engine Files:{Colors.ENDC} {engine_files} Python modules")
-    print(f"  {Colors.CYAN}Documentation:{Colors.ENDC} {doc_files} markdown files")
-    print(f"  {Colors.CYAN}Utility Scripts:{Colors.ENDC} {script_files} analysis tools")
+    print(f"  {Colors.CYAN}Core Package (genesis):{Colors.ENDC} {engine_files} Python modules")
+    print(f"  {Colors.CYAN}Documentation:{Colors.ENDC} {doc_files} research & meta files")
+    print(f"  {Colors.CYAN}Utility Tools:{Colors.ENDC} {script_files} analysis tools")
     
     # Corpus information
-    corpus_path = Path('engine/nwt_corpus.txt')
+    corpus_path = Path('data/genesis_data_cache.pt')
     if corpus_path.exists():
         size_mb = corpus_path.stat().st_size / (1024 * 1024)
-        print(f"  {Colors.CYAN}Corpus Size:{Colors.ENDC} {size_mb:.2f} MB")
+        print(f"  {Colors.CYAN}Data Cache Size:{Colors.ENDC} {size_mb:.2f} MB")
     
     # Check for checkpoints
     checkpoint_dir = Path('checkpoints')
@@ -165,15 +188,15 @@ def show_project_info():
     
     print(f"\n{Colors.BOLD}[Folders] Project Structure:{Colors.ENDC}\n")
     print("  Genesis_arbiter/")
-    print("  ├── engine/              # Core training system")
+    print("  ├── src/genesis/         # Core genesis package")
     print("  │   ├── models/          # Transformer architectures")
     print("  │   ├── training/        # FlashAttention & callbacks")
     print("  │   ├── datasets/        # Data loading")
     print("  │   └── train_*.py       # Training scripts")
-    print("  ├── docs/")
-    print("  │   ├── research/        # Technical papers")
-    print("  │   └── reference/       # Quick guides")
-    print("  ├── scripts/             # Utility tools")
+    print("  ├── data/                # Tokenizers and data caches")
+    print("  ├── tools/               # Utility tools")
+    print("  ├── docs/                # Research papers & guides")
+    print("  ├── project_doc/         # Legal & Contribution info")
     print("  └── checkpoints/         # Model snapshots")
     
     print(f"\n{Colors.BOLD}[Status] Framework Status:{Colors.ENDC}")
@@ -195,32 +218,48 @@ def main():
         choice = input(f"{Colors.BOLD}Select an option: {Colors.ENDC}").strip().lower()
         
         if choice == '1a':
-            run_script('engine/train_flash.py', 'Launching FlashAttention Training (Native PyTorch)')
+            run_script('src/genesis/train_flash.py', 'Launching FlashAttention Training (Native PyTorch)')
         
         elif choice == '1b':
-            # run_script('engine/train_native_multi_task.py', 'Training (Native PyTorch)', args=["--mode", "microscope", "--resume"])
-            # Or asking user? The request said "modify the option". 
-            # I'll just add it to the command.
-            print(f"\n{Colors.CYAN}Starting training (Auto-Resume enabled)...{Colors.ENDC}")
-            run_script('engine/train_native_multi_task.py', 'Training (Native PyTorch)', args=["--mode", "microscope", "--resume"])
+            config = load_genesis_config()
+            train_cfg = config.get("training", {})
+            
+            # Map config to command line arguments
+            args = ["--resume"]
+            if "mode" in train_cfg: args.extend(["--mode", train_cfg["mode"]])
+            if "batch_size" in train_cfg: args.extend(["--batch-size", str(train_cfg["batch_size"])])
+            if "learning_rate" in train_cfg: args.extend(["--lr", str(train_cfg["learning_rate"])])
+            if "max_steps" in train_cfg: args.extend(["--steps", str(train_cfg["max_steps"])])
+            if "val_interval" in train_cfg: args.extend(["--val-interval", str(train_cfg["val_interval"])])
+            
+            print(f"\n{Colors.CYAN}Starting training (Config: genesis_config.toml)...{Colors.ENDC}")
+            run_script('src/genesis/train_native_multi_task.py', 'Training (Native PyTorch)', args=args)
         
         elif choice == '2a':
-            run_script('scripts/count_unique_words.py', 'Analyzing Corpus Vocabulary')
+            run_script('tools/count_unique_words.py', 'Analyzing Corpus Vocabulary')
         
         elif choice == '2b':
-            run_script('scripts/count_logical_connectives.py', 'Counting Logical Connectives')
+            run_script('tools/count_logical_connectives.py', 'Counting Logical Connectives')
         
         elif choice == '2c':
-            run_script('scripts/update_data_cache.py', 'Updating VRAM Data Cache')
+            run_script('tools/update_data_cache.py', 'Updating VRAM Data Cache')
         
         elif choice == '3a':
-            run_script('scripts/arbiter_perplexity.py', 'Calculating Model Perplexity')
+            run_script('tools/arbiter_perplexity.py', 'Calculating Model Perplexity')
         
         elif choice == '3b':
-            run_script('scripts/friction_stress_test.py', 'Running Friction Stress Test')
+            run_script('tools/friction_stress_test.py', 'Running Friction Stress Test')
             
         elif choice == '3c':
-            run_script('scripts/interact_with_checkpoint.py', 'Interactive Checkpoint Chat')
+            config = load_genesis_config()
+            interact_cfg = config.get("interaction", {})
+            
+            args = []
+            if "device" in interact_cfg: args.extend(["--device", interact_cfg["device"]])
+            if "temperature" in interact_cfg: args.extend(["--temp", str(interact_cfg["temperature"])])
+            if "max_tokens" in interact_cfg: args.extend(["--max-tokens", str(interact_cfg["max_tokens"])])
+            
+            run_script('tools/interact_with_checkpoint.py', 'Interactive Checkpoint Chat', args=args)
         
         elif choice == '4a':
             open_documentation('docs/reference/QUICK_REFERENCE.md')
@@ -229,7 +268,7 @@ def main():
             open_documentation('docs/research/theoretical_foundations.md')
         
         elif choice == '4c':
-            open_documentation('PHASE1_SETUP.md')
+            open_documentation('docs/PHASE1_SETUP.md')
         
         elif choice == '4d':
             open_documentation('docs/research/grokking_detection_methodology.md')
@@ -238,19 +277,19 @@ def main():
             open_documentation('docs/roadmap/README.md')
         
         elif choice == '5a':
-            run_script('engine/verify_phase1.py', 'Verifying FlashAttention Setup')
+            run_script('src/genesis/verify_phase1.py', 'Verifying FlashAttention Setup')
         
         elif choice == '5b':
-            run_script('engine/arbiter_quick_eval.py', 'Running Quick Evaluation')
+            run_script('src/genesis/arbiter_quick_eval.py', 'Running Quick Evaluation')
         
         elif choice == '5c':
-            run_script('engine/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
+            run_script('src/genesis/arbiter_long_pipeline.py', 'Launching Long Training Pipeline')
         
         elif choice == '5d':
-            run_script('engine/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
+            run_script('src/genesis/arbiter_sweep_orchestrator.py', 'Starting Parameter Sweep')
         
         elif choice == '5e':
-            run_script('scripts/arbiter_data_augmentor.py', 'Generating Augmented Data')
+            run_script('tools/arbiter_data_augmentor.py', 'Generating Augmented Data')
         
         elif choice == '6':
             show_project_info()

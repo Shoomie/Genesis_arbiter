@@ -69,6 +69,10 @@ class MultiTaskLlama(nn.Module):
         # Tie weights with input embeddings (common practice)
         self.lm_head.weight = base_model.tok_embeddings.weight
         
+        # Also ensure base model's own output head is tied if it exists
+        if hasattr(base_model, 'output'):
+            base_model.output.weight = base_model.tok_embeddings.weight
+        
         # ===== Task Head 2: Coherence Detection (Binary Classification) =====
         # Given two verse embeddings, predict if they form a coherent sequence
         self.coherence_head = nn.Sequential(
@@ -328,7 +332,7 @@ def create_multi_task_model(
 
 if __name__ == "__main__":
     # Simple test
-    from models.llama.model import Llama
+    from .llama.model import Llama
     
     print("Creating test model...")
     base = Llama(

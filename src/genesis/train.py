@@ -11,10 +11,10 @@ import math
 import time
 
 # Core imports
-from models.llama.model import Llama
-from models.tokenizer import GenesisTokenizer
-from components.checkpoint import save_checkpoint
-from datasets.bible import get_bible_dataloader
+from .models.llama.model import Llama
+from .models.tokenizer import GenesisTokenizer
+from .components.checkpoint import save_checkpoint
+from .datasets.bible import get_bible_dataloader
 
 # Phase 3 Arbiter imports
 try:
@@ -220,25 +220,21 @@ def get_protocol_config(mode: str):
 
 def find_tokenizer(vocab_size: int = 8192):
     """
-    Find appropriate tokenizer from arbiter_tokenizer_factory output.
-    Falls back to genesis_tokenizer.json if not found.
+    Find appropriate tokenizer from data/ directory.
     """
-    tokenizer_dir = Path("../tokenizers")
-    
-    # Try to find arbiter tokenizer matching vocab size
+    # Try to find arbiter tokenizer matching vocab size in data/
+    tokenizer_dir = Path("data")
     if tokenizer_dir.exists():
         model_file = tokenizer_dir / f"arbiter_nwt_{vocab_size}.model"
         if model_file.exists():
             print(f"✓ Found custom tokenizer: {model_file}")
-            # For now, return None and we'll handle SentencePiece in future update
-            # Fall back to GenesisTokenizer
     
-    # Fallback to genesis tokenizer
-    if Path("genesis_tokenizer.json").exists():
-        print(f"Using genesis_tokenizer.json (legacy)")
-        return GenesisTokenizer("genesis_tokenizer.json")
+    # Fallback to genesis tokenizer in data/
+    if Path("data/genesis_char_tokenizer.json").exists():
+        print(f"Using data/genesis_char_tokenizer.json")
+        return GenesisTokenizer("data/genesis_char_tokenizer.json")
     
-    raise FileNotFoundError("No tokenizer found. Run 'python ../scripts/arbiter_tokenizer_factory.py nwt_corpus.txt'")
+    raise FileNotFoundError("No tokenizer found. Run 'python tools/arbiter_tokenizer_factory.py data/nwt_corpus.txt'")
 
 def train():
     parser = argparse.ArgumentParser(description="Genesis Arbiter Training (Single Model)")
@@ -458,8 +454,8 @@ def train():
             print(f"\n✓ Standard dataset (no special masking)")
         
         dataloader = get_bible_dataloader(
-            corpus_path="nwt_corpus.txt",
-            tokenizer=tokenizer if tokenizer else GenesisTokenizer("genesis_tokenizer.json"),
+            corpus_path="data/nwt_corpus.txt",
+            tokenizer=tokenizer if tokenizer else GenesisTokenizer("data/genesis_char_tokenizer.json"),
             batch_size=config["training"]["batch_size"],
             max_seq_len=model_cfg["max_seq_len"]
         )

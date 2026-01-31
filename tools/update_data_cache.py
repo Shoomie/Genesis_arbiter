@@ -11,13 +11,13 @@ import sys
 from pathlib import Path
 import torch
 
-# Add engine to path
+# Add src to path
 current_dir = Path(__file__).parent.absolute()
 project_root = current_dir.parent
-sys.path.append(str(project_root))
+sys.path.append(str(project_root / "src"))
 
-from engine.models.tokenizer import GenesisTokenizer
-from engine.datasets.multi_task_sampler import process_and_save_cache
+from genesis.models.tokenizer import GenesisTokenizer
+from genesis.datasets.multi_task_sampler import process_and_save_cache
 
 def main():
     print(">>> Genesis Data Cache Updater\n")
@@ -27,8 +27,8 @@ def main():
     if not bible_dir.exists():
         bible_dir = project_root / "Bible"
         
-    cache_path = project_root / "genesis_data_cache.pt"
-    tokenizer_path = project_root / "engine" / "genesis_tokenizer.json"
+    cache_path = project_root / "data" / "genesis_data_cache.pt"
+    tokenizer_path = project_root / "data" / "genesis_char_tokenizer.json"
     
     print(f"Bible Directory: {bible_dir}")
     print(f"Cache Output:    {cache_path}")

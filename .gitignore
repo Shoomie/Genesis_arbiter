@@ -44,6 +44,11 @@ checkpoints/
 *.ckpt
 *.safetensors
 
+# Data caches and large files
+data/genesis_data_cache.pt
+data/genesis_data_cache_*.pt
+data/*.pt
+
 # Training logs
 logs/
 runs/

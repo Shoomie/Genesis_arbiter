@@ -5,17 +5,15 @@ import os
 import sys
 import math
 
-# Add parent directory to path for imports
-# Works both when run directly and from menu system
+# Add src directory to path for imports
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
-engine_dir = os.path.join(parent_dir, "engine")
-for d in [parent_dir, engine_dir]:
-    if d not in sys.path:
-        sys.path.insert(0, d)
+src_dir = os.path.join(parent_dir, "src")
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
-from models.llama.model import Llama
-from models.tokenizer import GenesisTokenizer
+from genesis.models.llama.model import Llama
+from genesis.models.tokenizer import GenesisTokenizer
 
 def calculate_perplexity(model, tokenizer, text, device):
     inputs = tokenizer(text).to(device)
@@ -28,8 +26,8 @@ def calculate_perplexity(model, tokenizer, text, device):
         return math.exp(loss.item())
 
 def run_perplexity_test():
-    checkpoint_path = "./checkpoints/step_2000/model.safetensors"
-    tokenizer_path = "genesis_tokenizer.json"
+    checkpoint_path = os.path.join(parent_dir, "checkpoints", "step_2000", "model.safetensors")
+    tokenizer_path = os.path.join(parent_dir, "data", "genesis_char_tokenizer.json")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print("=== Axiomatic Stability Check ===")

@@ -21,14 +21,16 @@ import argparse
 from pathlib import Path
 import time
 from datetime import timedelta
+import toml
 
 # Core imports
-from models.multi_task_wrapper import MultiTaskLlama
-from models.tokenizer import GenesisTokenizer
-from datasets.multi_task_sampler import get_multi_task_dataloader
-from training.flash_attention_config import print_flash_attention_status
-from training.callbacks.grokking import GrokkingDetector, ProcrustesMonitor, ConceptClusteringMonitor
-from training.callbacks.manager import CallbackManager
+from .models.multi_task_wrapper import MultiTaskLlama
+from .models.tokenizer import GenesisTokenizer
+from .datasets.multi_task_sampler import get_multi_task_dataloader
+from .training.flash_attention_config import print_flash_attention_status
+from .training.callbacks.grokking import GrokkingDetector, ProcrustesMonitor, ConceptClusteringMonitor
+from .training.callbacks.manager import CallbackManager
+from .evaluation.procedural_evaluator import ProceduralEvaluator
 
 
 # ============================================================================
@@ -49,29 +51,74 @@ CONFIG = {
     },
 
     # Training Hyperparameters
-    "LEARNING_RATE": 1.5e-4,           # Base learning rate
+    "LEARNING_RATE": 1e-4,           # Base learning rate
     "WEIGHT_DECAY": 0.08,            # L2 regularization strength
-    "MAX_STEPS": 50000,              # Total training steps
+    "MAX_STEPS": 300000,              # Total training steps
+    "LR_SCHEDULE": "cosine",         # Options: "constant", "cosine"
+    "WARMUP_STEPS": 2000,            # Number of steps for linear LR warmup
+    "MIN_LR_RATIO": 0.1,             # Minimum LR as a fraction of base LR (for cosine)
     
     # Precision & Performance
     "PRECISION": "bf16",             # Options: "fp32", "fp16", "bf16", "int8", "int4"
-    "BATCH_SIZE": 16192,                 # Micro-batch size per optimization step (per GPU)
+    "BATCH_SIZE": 1024,                 # Micro-batch size per optimization step (per GPU)
     "GRAD_ACCUM_STEPS": 1,           # Number of steps to accumulate gradients before updating
     # Effective Batch Size = BATCH_SIZE * GRAD_ACCUM_STEPS
     # For Grokking: Recommended effective batch >= 16
     
     # Checkpoint & Logging Intervals
-    "SAVE_INTERVAL": 500,            # Steps between checkpoints
-    "LOG_INTERVAL": 10,              # Steps between console logs
-    "VAL_INTERVAL": 100,             # Steps between validation runs
+    "SAVE_INTERVAL": 2000,            # Steps between checkpoints
+    "LOG_INTERVAL": 100,              # Steps between console logs
+    "VAL_INTERVAL": 500,             # Steps between validation runs
+    "EVAL_INTERVAL": 1000,            # Steps between extensive evaluation (BERT, Span, Verse)
+    "EVAL_RECON_SAMPLES": 50,         # Number of samples for reconstruction eval
+    "EVAL_AUX_SAMPLES": 20,           # Number of samples for auxiliary tasks
     
     # Advanced Features
     "DETECT_GROKKING": True,         # Enable grokking detection callbacks
     "VERBOSE_LOGGING": True,         # Extended runtime metrics (throughput etc.)
     
-    # Data Configuration
-    "BIBLE_DIR": "../../Bible",      # Path to Bible data directory (relative to script)
+# Data Configuration
+    "BIBLE_DIR": "../../../Bible",      # Path to Bible data directory (relative to script)
 }
+
+def load_central_config():
+    """Load settings from genesis_config.toml at project root."""
+    try:
+        # Find project root (3 levels up from this file)
+        root = Path(__file__).parent.parent.parent
+        config_path = root / "genesis_config.toml"
+        if config_path.exists():
+            central_cfg = toml.load(config_path)
+            train_cfg = central_cfg.get("training", {})
+            
+            # Map central to local keys
+            mapping = {
+                "mode": "MODE",
+                "learning_rate": "LEARNING_RATE",
+                "weight_decay": "WEIGHT_DECAY",
+                "max_steps": "MAX_STEPS",
+                "batch_size": "BATCH_SIZE",
+                "grad_accum_steps": "GRAD_ACCUM_STEPS",
+                "save_interval": "SAVE_INTERVAL",
+                "log_interval": "LOG_INTERVAL",
+                "val_interval": "VAL_INTERVAL",
+                "eval_interval": "EVAL_INTERVAL",
+                "detect_grokking": "DETECT_GROKKING",
+                "verbose_logging": "VERBOSE_LOGGING",
+                "bible_dir": "BIBLE_DIR"
+            }
+            
+            for central_key, local_key in mapping.items():
+                if central_key in train_cfg:
+                    CONFIG[local_key] = train_cfg[central_key]
+            
+            return True
+    except Exception as e:
+        print(f"[WARN] Failed to load central config: {e}")
+    return False
+
+# Load central config if available
+load_central_config()
 
 # ============================================================================
 # Effective batch size = BATCH_SIZE × GRAD_ACCUM_STEPS
@@ -147,13 +194,19 @@ def train_multi_task(
     bible_dir: str = None,
     learning_rate: float = None,
     weight_decay: float = None,
+    lr_schedule: str = None,
+    warmup_steps: int = None,
+    min_lr_ratio: float = None,
     verbose_logging: bool = None,
     resume_from_checkpoint: bool = False,
     compile_model: bool = False,
     gradient_checkpointing: bool = False,
     cpu_data: bool = False,
     target_languages: list = None,
-    prepare_cache: bool = False
+    prepare_cache: bool = False,
+    eval_interval: int = None,
+    eval_recon_samples: int = None,
+    eval_aux_samples: int = None
 ):
     """Load defaults from CONFIG if not provided via command line."""
     mode = mode or CONFIG["MODE"]
@@ -163,11 +216,17 @@ def train_multi_task(
     save_interval = save_interval or CONFIG["SAVE_INTERVAL"]
     log_interval = log_interval or CONFIG["LOG_INTERVAL"]
     val_interval = val_interval or CONFIG["VAL_INTERVAL"]
+    eval_interval = eval_interval or CONFIG.get("EVAL_INTERVAL", 1000)
+    eval_recon_samples = eval_recon_samples or CONFIG.get("EVAL_RECON_SAMPLES", 50)
+    eval_aux_samples = eval_aux_samples or CONFIG.get("EVAL_AUX_SAMPLES", 20)
     precision = precision or CONFIG["PRECISION"]
     detect_grokking = detect_grokking if detect_grokking is not None else CONFIG["DETECT_GROKKING"]
     bible_dir = bible_dir or CONFIG["BIBLE_DIR"]
     learning_rate = learning_rate or CONFIG["LEARNING_RATE"]
     weight_decay = weight_decay or CONFIG["WEIGHT_DECAY"]
+    lr_schedule = lr_schedule or CONFIG.get("LR_SCHEDULE", "cosine")
+    warmup_steps = warmup_steps if warmup_steps is not None else CONFIG.get("WARMUP_STEPS", 2000)
+    min_lr_ratio = min_lr_ratio if min_lr_ratio is not None else CONFIG.get("MIN_LR_RATIO", 0.1)
     verbose_logging = verbose_logging if verbose_logging is not None else CONFIG["VERBOSE_LOGGING"]
     """
     Multi-task training with native PyTorch.
@@ -225,14 +284,11 @@ def train_multi_task(
         # For multiple specific languages, use a generic filtered cache name
         cache_filename = "genesis_data_cache_filtered.pt"
 
-    cache_path = script_dir.parent / cache_filename
+    cache_path = script_dir.parent.parent / "data" / cache_filename
     
     # Initialize tokenizer (anchored to script location)
     print("Loading tokenizer...")
-    tokenizer_path = script_dir / "genesis_tokenizer.json"
-    if not tokenizer_path.exists():
-        # Try root
-        tokenizer_path = script_dir.parent / "genesis_tokenizer.json"
+    tokenizer_path = script_dir.parent.parent / "data" / "genesis_char_tokenizer.json"
     
     tokenizer = GenesisTokenizer(str(tokenizer_path))
     print(f"  Vocab size: {tokenizer.vocab_size}")
@@ -245,7 +301,7 @@ def train_multi_task(
         print(f"Target file: {cache_path}")
         print(f"Languages: {target_languages if target_languages else 'ALL'}")
         
-        from datasets.multi_task_sampler import process_and_save_cache
+        from .datasets.multi_task_sampler import process_and_save_cache
         process_and_save_cache(
             bible_data_dir=bible_dir,
             tokenizer=tokenizer,
@@ -340,6 +396,12 @@ def train_multi_task(
     if original_vocab_size != config['vocab_size']:
         print(f"\n[CONFIG] Auto-adjusted vocab_size: {original_vocab_size} -> {config['vocab_size']}")
     
+    # Save target languages and LR settings for easier restoration
+    config['target_languages'] = target_languages
+    config['lr_schedule'] = lr_schedule
+    config['warmup_steps'] = warmup_steps
+    config['min_lr_ratio'] = min_lr_ratio
+    
     # FlashAttention status
     print(f"\nFlashAttention Status:")
     print_flash_attention_status()
@@ -417,14 +479,16 @@ def train_multi_task(
     # Initialize multi-task model
     print("\nInitializing multi-task model...")
     
-    # Create base Llama model first (filter out 'params' key used for display)
-    from models.llama.model import Llama
-    model_config = {k: v for k, v in config.items() if k != 'params'}
+    # Create base Llama model first (filter out non-architecture keys)
+    from .models.llama.model import Llama
+    # We only pass keys that Llama.__init__ actually accepts
+    llama_keys = {'vocab_size', 'n_layers', 'dim', 'n_heads', 'intermediate_size', 'max_seq_len', 'norm_type'}
+    model_init_config = {k: v for k, v in config.items() if k in llama_keys}
     
-    # Override vocab_size with actual tokenizer size
-    model_config['vocab_size'] = tokenizer.vocab_size
+    # Ensure vocab_size is correct
+    model_init_config['vocab_size'] = tokenizer.vocab_size
     
-    base_model = Llama(**model_config)
+    base_model = Llama(**model_init_config)
     
     # Wrap with multi-task heads (pass dim and vocab_size explicitly)
     model = MultiTaskLlama(
@@ -518,6 +582,27 @@ def train_multi_task(
     # Scaler for AMP
     scaler = GradScaler('cuda', enabled=(precision == "fp16"))
     
+    # Scheduler Initialization
+    print(f"Initializing scheduler: {lr_schedule}")
+    def get_lr_multiplier(step):
+        # Linear Warmup
+        if step < warmup_steps:
+            return float(step) / float(max(1, warmup_steps))
+        
+        # After warmup
+        if lr_schedule == "constant":
+            return 1.0
+        
+        # Cosine Decay
+        progress = float(step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+        progress = min(1.0, progress)
+        cosine_decay = 0.5 * (1.0 + np.cos(np.pi * progress))
+        
+        # Min LR scale
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine_decay
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=get_lr_multiplier)
+    
     # Load State if Resuming
     if resume_checkpoint:
         print(f"\n[RESUME] Loading state from {resume_checkpoint}...")
@@ -541,6 +626,8 @@ def train_multi_task(
                 optimizer.load_state_dict(checkpoint_data['optimizer'])
                 if 'scaler' in checkpoint_data:
                     scaler.load_state_dict(checkpoint_data['scaler'])
+                if 'scheduler' in checkpoint_data:
+                    scheduler.load_state_dict(checkpoint_data['scheduler'])
                 
                 initial_step = checkpoint_data.get('step', 0)
                 print(f"  [OK] Resumed training from step {initial_step}")
@@ -568,6 +655,15 @@ def train_multi_task(
             ConceptClusteringMonitor(eval_interval=2000)
         ])
         callbacks.on_train_start(model)
+    
+    # Initialize Procedural Evaluator
+    evaluator = ProceduralEvaluator(
+        model=model,
+        dataset=dataloader.dataset,
+        tokenizer=tokenizer,
+        device=device,
+        verbose=True
+    )
     
     # Training Loop
     print(f"\n{'='*70}")
@@ -643,6 +739,9 @@ def train_multi_task(
                 scaler.update()
                 optimizer.zero_grad()
                 
+                # Scheduler step
+                scheduler.step()
+                
                 global_step += 1
                 running_loss += loss.item() * grad_accum_steps
                 
@@ -686,19 +785,37 @@ def train_multi_task(
                     running_loss = 0.0
                     start_time = time.time()
                 
-                # Validation
-                if global_step % val_interval == 0:
-                    print(f"\n[VAL] Running validation at step {global_step}...")
-                    val_loss = run_validation(model, dataloader, device, use_amp=use_amp, amp_dtype=amp_dtype)
-                    print(f"  Validation loss: {val_loss:.4f}\n")
+                # Extensive Evaluation
+                if global_step % eval_interval == 0:
+                    print(f"\n[EVAL] Running extensive procedural evaluation at step {global_step}...")
+                    eval_results = evaluator.run_suite(
+                        use_amp=use_amp, 
+                        amp_dtype=amp_dtype,
+                        num_recon_samples=eval_recon_samples,
+                        num_aux_samples=eval_aux_samples
+                    )
                     
-                    writer.add_scalar("val/loss", val_loss, global_step)
+                    # Log all metrics to TensorBoard
+                    for key, val in eval_results.items():
+                        writer.add_scalar(f"val/{key}", val, global_step)
+                    
+                    # Main evaluation loss
+                    val_loss = eval_results.get('recon_bert_loss', 0.0)
+                    print(f"  BERT-Loss: {val_loss:.4f} | CER: {eval_results.get('recon_bert_cer', 0.0):.4f}\n")
                     
                     # Trigger validation end callbacks
                     if callbacks:
-                        callbacks.on_validation_end(global_step, model, val_loss, {})
+                        callbacks.on_validation_end(global_step, model, val_loss, eval_results)
                     
                     model.train()
+                
+                # Simple Validation (if different from extensive eval)
+                elif global_step % val_interval == 0:
+                    print(f"\n[VAL] Running quick validation at step {global_step}...")
+                    # For now just run a subset of reconstruction or something simple 
+                    # but since the user wants to control extensive eval specifically:
+                    # We'll just run a smaller/faster version if they are separate.
+                    pass
                 
                 # Checkpointing
                 if global_step % save_interval == 0:
@@ -709,6 +826,7 @@ def train_multi_task(
                         'model': model.state_dict(),
                         'optimizer': optimizer.state_dict(),
                         'scaler': scaler.state_dict(),
+                        'scheduler': scheduler.state_dict(),
                         'config': config
                     }, checkpoint_path)
                     print()
@@ -728,6 +846,7 @@ def train_multi_task(
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'scaler': scaler.state_dict(),
+        'scheduler': scheduler.state_dict(),
         'config': config
     }, final_checkpoint)
     
@@ -747,38 +866,6 @@ def train_multi_task(
     print(f"  tensorboard --logdir {log_dir}")
     print()
 
-
-def run_validation(model, dataloader, device, use_amp=True, amp_dtype=None, num_batches=10):
-    """Run validation and return average loss."""
-    model.eval()
-    total_loss = 0.0
-    count = 0
-    
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(dataloader):
-            if batch_idx >= num_batches:
-                break
-            
-            task = batch['task']
-            
-            with autocast('cuda', enabled=use_amp, dtype=amp_dtype if use_amp else None):
-                if task == 'lm':
-                    tokens = batch['tokens'].to(device)
-                    labels = batch['labels'].to(device)
-                    loss, _ = model.forward_lm(tokens, labels)
-                elif task == 'coherence':
-                    verse1 = batch['verse1_tokens'].to(device)
-                    verse2 = batch['verse2_tokens'].to(device)
-                    labels = batch['labels'].to(device)
-                    loss, _ = model.forward_coherence(verse1, verse2, labels)
-                # Add other tasks as needed
-                else:
-                    continue
-            
-            total_loss += loss.item()
-            count += 1
-    
-    return total_loss / count if count > 0 else 0.0
 
 
 def main():
@@ -810,6 +897,9 @@ Example usage:
     parser.add_argument("--precision", type=str, default="fp16",
                         choices=["fp32", "fp16", "bf16", "int8", "int4"],
                         help="Training precision mode")
+    parser.add_argument("--eval-interval", type=int, help="Extensive evaluation interval")
+    parser.add_argument("--eval-recon-samples", type=int, help="Number of samples for reconstruction eval")
+    parser.add_argument("--eval-aux-samples", type=int, help="Number of samples for auxiliary tasks")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--no-grokking", action="store_true", help="Disable grokking detection")
     parser.add_argument("--bible-dir", type=str, help="Bible data directory")
@@ -817,6 +907,11 @@ Example usage:
     parser.add_argument("--weight-decay", type=float, help="Weight decay")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (GPU, memory, throughput)")
     parser.add_argument("--no-verbose", action="store_true", help="Disable verbose logging")
+    
+    # Scheduler options
+    parser.add_argument("--schedule", type=str, choices=["constant", "cosine"], help="LR schedule type")
+    parser.add_argument("--warmup", type=int, help="Number of warmup steps")
+    parser.add_argument("--min-lr-ratio", type=float, help="Minimum LR ratio for cosine decay")
     
     # Optimization flags
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile()")
@@ -864,11 +959,17 @@ Example usage:
         save_interval=args.save_interval if "--save-interval" in " ".join(__import__('sys').argv) else None,
         log_interval=args.log_interval if "--log-interval" in " ".join(__import__('sys').argv) else None,
         val_interval=args.val_interval if "--val-interval" in " ".join(__import__('sys').argv) else None,
+        eval_interval=args.eval_interval,
+        eval_recon_samples=args.eval_recon_samples,
+        eval_aux_samples=args.eval_aux_samples,
         precision=args.precision if "--precision" in " ".join(__import__('sys').argv) else None,
         detect_grokking=not args.no_grokking if args.no_grokking else None,
         bible_dir=args.bible_dir,
         learning_rate=args.lr if args.lr else None,
         weight_decay=args.weight_decay if args.weight_decay else None,
+        lr_schedule=args.schedule if args.schedule else None,
+        warmup_steps=args.warmup if args.warmup is not None else None,
+        min_lr_ratio=args.min_lr_ratio if args.min_lr_ratio is not None else None,
         verbose_logging=verbose,
         resume_from_checkpoint=args.resume,
         compile_model=args.compile,

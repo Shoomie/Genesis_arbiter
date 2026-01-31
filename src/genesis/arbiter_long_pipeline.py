@@ -23,12 +23,21 @@ from dataclasses import dataclass
 
 # Import our modules
 try:
-    from arbiter_logger import ArbiterLogger
-    from arbiter_quick_eval import ArbiterQuickEval
-    from ..scripts.arbiter_tokenizer_factory import ArbiterTokenizerFactory
-    from ..scripts.arbiter_data_augmentor import ArbiterDataAugmentor
+    from .arbiter_logger import ArbiterLogger
+    from .arbiter_quick_eval import ArbiterQuickEval
+    
+    # Tools are imported as absolute from the root if root added to PYTHONPATH, 
+    # or we can use relative if they were in the same package.
+    # Since they were moved to tools/, we'll assume they are accessible via 'tools'
+    from tools.arbiter_tokenizer_factory import ArbiterTokenizerFactory
+    from tools.arbiter_data_augmentor import ArbiterDataAugmentor
 except ImportError:
-    print("[WARNING] Some modules not found - running in simulation mode")
+    # Fallback to direct imports if run in a way that 'tools' is not a package
+    try:
+        from . import arbiter_logger as ArbiterLogger
+        from . import arbiter_quick_eval as ArbiterQuickEval
+    except:
+        print("[WARNING] Some modules not found - running in simulation mode")
 
 
 @dataclass
