@@ -37,6 +37,12 @@ class InfiniteGPULoader:
         
         print(f"[OK] GPU DataLoader initialized on {device}")
         print(f"     Dataset size: {len(data_tensor)} tokens, {len(verse_indices)} verses")
+        
+        # Compatibility aliases for ProceduralEvaluator
+        self.locale_verse_map = self.locale_map
+        self._get_coherence_sample = self._sample_coherence
+        self._get_cross_ref_sample = self._sample_cross_ref
+        self._get_paraphrase_sample = self._sample_paraphrase
 
     def _sample_lm(self):
         """Sample batch for Language Modeling."""

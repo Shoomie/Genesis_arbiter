@@ -61,6 +61,8 @@ class TrainingConfig:
     eval_interval: int = 1000
     
     # Evaluation
+    enable_validation: bool = True
+    enable_extensive_eval: bool = True
     eval_recon_samples: int = 50
     eval_aux_samples: int = 20
     detect_grokking: bool = True

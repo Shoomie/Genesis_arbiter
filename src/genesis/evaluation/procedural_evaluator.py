@@ -27,13 +27,14 @@ class ProceduralEvaluator:
         self.verbose = verbose
         
         # Determine mask token
-        if hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level():
+        if (hasattr(tokenizer, 'is_character_level') and tokenizer.is_character_level()) or \
+           (hasattr(tokenizer, 'is_byte_level') and tokenizer.is_byte_level()):
             self.mask_token_id = getattr(tokenizer, 'mask_id', 0)
         else:
-            self.mask_token_id = tokenizer.tokenizer.token_to_id("[MASK]")
-            
-        if self.mask_token_id is None or self.mask_token_id == 0:
-            self.mask_token_id = 0
+            try:
+                self.mask_token_id = tokenizer.tokenizer.token_to_id("[MASK]")
+            except:
+                self.mask_token_id = 0
             
     def _calculate_cer(self, pred_ids: torch.Tensor, target_ids: torch.Tensor) -> float:
         """Calculate Character Error Rate (CER) at token/character level."""
@@ -138,7 +139,9 @@ class ProceduralEvaluator:
                     target_verse_start_in_seq = 0
                     target_verse_len = length
                 
-                if len(raw_tokens) < 5: continue 
+                if len(raw_tokens) < 5:
+                    if self.verbose: print(f"    [DEBUG] Sample too short: {len(raw_tokens)}")
+                    continue 
                 
                 # 3. Apply masking
                 if strategy == 'verse':
@@ -158,7 +161,9 @@ class ProceduralEvaluator:
                     
                 # 5. Calculate metrics
                 mask = labels != -100
-                if not mask.any(): continue
+                if not mask.any():
+                    if self.verbose: print(f"    [DEBUG] No tokens masked for strategy {strategy}")
+                    continue
                 
                 preds = logits[0, mask].argmax(dim=-1)
                 targets = labels[mask]
@@ -167,6 +172,9 @@ class ProceduralEvaluator:
                 total_cer += self._calculate_cer(preds, targets)
                 total_exact += 1.0 if torch.equal(preds, targets) else 0.0
                 count += 1
+                
+        if self.verbose:
+            print(f"    [DEBUG] Strategy {strategy} finished with count={count}")
                 
         prefix = f'recon_{strategy}'
         return {

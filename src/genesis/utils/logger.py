@@ -292,6 +292,17 @@ class ArbiterLogger:
             if tokens_per_sec is not None:
                 self.tensorboard_writer.add_scalar('System/TokensPerSec', tokens_per_sec, step)
     
+    def log_metrics(self, metrics: Dict[str, float], step: int):
+        """
+        Log a dictionary of arbitrary metrics to TensorBoard.
+        This is a flexible alternative to the structured logging methods.
+        """
+        if self.tensorboard_writer:
+            for k, v in metrics.items():
+                if v is not None:
+                    # Clean the key for TB if needed
+                    self.tensorboard_writer.add_scalar(k, v, step)
+    
     def log_evaluation(
         self,
         step: int,

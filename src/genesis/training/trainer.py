@@ -201,12 +201,13 @@ class GenesisTrainer:
                 )
                 t0 = time.time()
                 
-            # Validation
-            if self.val_loader and self.global_step % self.config.val_interval == 0:
+            # 5. Validation
+            if self.config.enable_validation and self.global_step % self.config.val_interval == 0:
                 self.validate()
                 
             # Evaluation
-            if self.config.eval_interval > 0 and self.global_step % self.config.eval_interval == 0:
+            # 4. Extensive Evaluation
+            if self.config.enable_extensive_eval and self.global_step % self.config.eval_interval == 0:
                 self.evaluate_extensive()
                 
             # Checkpointing
@@ -250,15 +251,20 @@ class GenesisTrainer:
     def evaluate_extensive(self):
         """Run extensive procedural evaluation."""
         print(f"\n[Step {self.global_step}] Running Extensive Evaluation...")
-        evaluator = ProceduralEvaluator(self.model, self.train_loader.dataset, self.tokenizer, self.device)
+        evaluator = ProceduralEvaluator(self.model, self.train_loader, self.tokenizer, self.device)
         
-        # Reconstruction
-        recon_score = evaluator.evaluate_reconstruction(
-            self.config.bible_dir, 
-            samples=self.config.eval_recon_samples
+        # Use run_suite to get all metrics (reconstruction, coherence, etc.)
+        metrics = evaluator.run_suite(
+            use_amp=(self.config.precision in ["bf16", "fp16"]),
+            amp_dtype=self._get_dtype(),
+            num_recon_samples=self.config.eval_recon_samples,
+            num_aux_samples=self.config.eval_aux_samples
         )
-        self.logger.log_metrics({"eval/reconstruction": recon_score}, step=self.global_step)
-        print(f"  Reconstruction Score: {recon_score:.4f}")
+        
+        # Log to ArbiterLogger
+        self.logger.log_metrics(metrics, step=self.global_step)
+        
+        # Already prints summary inside run_suite
         
     def save_checkpoint(self, path=None):
         """Save model checkpoint."""

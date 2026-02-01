@@ -23,6 +23,7 @@ class ByteTokenizer:
         # Bytes are offset by 4
         self.byte_offset = 4
         self.vocab_size = 256 + self.byte_offset
+        self.mask_id = self.pad_id # Use pad for masking in byte-level
         
         print(f"[OK] Initialized Byte-Level UTF-8 Tokenizer (vocab size: {self.vocab_size})")
 
@@ -82,6 +83,12 @@ class ByteTokenizer:
     def get_vocab_size(self):
         return self.vocab_size
 
+    def is_character_level(self):
+        return False
+
+    def is_byte_level(self):
+        return True
+
 
 class GenesisTokenizer:
     """
@@ -97,6 +104,7 @@ class GenesisTokenizer:
             self.tokenizer = ByteTokenizer()
             self.tokenizer_type = 'byte'
             self.vocab_size = self.tokenizer.vocab_size
+            self.mask_id = self.tokenizer.mask_id
             return
 
         if not tokenizer_path:
@@ -104,6 +112,7 @@ class GenesisTokenizer:
             self.tokenizer = ByteTokenizer()
             self.tokenizer_type = 'byte'
             self.vocab_size = self.tokenizer.vocab_size
+            self.mask_id = self.tokenizer.mask_id
             return
             
         # Load and detect tokenizer type from file
@@ -127,6 +136,7 @@ class GenesisTokenizer:
             self.tokenizer = ByteTokenizer()
             self.tokenizer_type = 'byte'
             self.vocab_size = self.tokenizer.vocab_size
+            self.mask_id = self.tokenizer.mask_id
     
     def _init_char_tokenizer(self, config):
         """Initialize character-level tokenizer from config."""
@@ -262,6 +272,10 @@ class GenesisTokenizer:
     def is_character_level(self):
         """Check if tokenizer is character-level."""
         return self.tokenizer_type == 'character'
+
+    def is_byte_level(self):
+        """Check if tokenizer is byte-level."""
+        return self.tokenizer_type == 'byte'
 
     def compress_vocab(self, active_token_ids):
         """
