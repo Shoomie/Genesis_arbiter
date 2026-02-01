@@ -69,6 +69,18 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     # Override with [model] section from TOML
     model_config = base_cfg.merge(model_cfg_dict)
     
+    # Handle auto settings
+    if model_cfg_dict.get("intermediate_size") == "auto":
+        model_config.intermediate_size = model_config.dim * 4
+        
+    # Sync max_seq_len (model vs data)
+    # Default to data's max_seq_len if not explicitly set in [model]
+    if "max_seq_len" not in model_cfg_dict:
+        model_config.max_seq_len = train_config.max_seq_len
+    else:
+        # If set in [model], ensure training loop matches it
+        train_config.max_seq_len = model_config.max_seq_len
+
     return train_config, model_config
 
 def get_model(config: ModelConfig, device: str) -> MultiTaskLlama:
@@ -81,7 +93,7 @@ def get_model(config: ModelConfig, device: str) -> MultiTaskLlama:
         dim=config.dim,
         n_heads=config.n_heads,
         intermediate_size=config.intermediate_size,
-        max_seq_len=1024,
+        max_seq_len=config.max_seq_len,
         norm_type=config.norm_type
     )
     
@@ -91,6 +103,9 @@ def get_model(config: ModelConfig, device: str) -> MultiTaskLlama:
         dim=config.dim,
         vocab_size=config.vocab_size
     )
+    
+    # Attach config for checkpointing
+    model.config = config
     
     return model
 

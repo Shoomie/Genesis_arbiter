@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any
 from dataclasses import asdict
 
 # Local imports
-from .config import TrainingConfig
+from .config import TrainingConfig, ModelConfig
 from .scheduler import LRScheduler
 from .flash_attention_config import print_flash_attention_status
 from .callbacks.manager import CallbackManager
@@ -44,6 +44,7 @@ class GenesisTrainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.config = config
+        self.arch_config = getattr(model, 'config', None)
         
         # Setup device
         self.device = torch.device(config.device)
@@ -93,6 +94,7 @@ class GenesisTrainer:
                 "dim": getattr(self.model.base, 'dim', 0),
                 "n_heads": getattr(self.model.base, 'n_heads', 0),
                 "vocab_size": getattr(self.model, 'vocab_size', 0),
+                "max_seq_len": self.config.max_seq_len,
             },
             "system": {
                 "precision": config.precision,
@@ -113,6 +115,11 @@ class GenesisTrainer:
         self.current_step = 0
         self.global_step = 0
         self.best_val_loss = float('inf')
+        
+        # Performance Tracking
+        self.interval_tokens = 0
+        self.interval_time = 0.0
+        self.smoothed_s_per_step = None
         
         # Display model info on init if requested or standard
         self._print_startup_banner()
@@ -150,6 +157,7 @@ class GenesisTrainer:
         print(f"  [RUN] Training loop engaged. Monitoring diagnostics...")
         
         while self.global_step < self.config.max_steps:
+            step_start = time.time()
             # Training step
             step_loss = 0.0
             self.optimizer.zero_grad(set_to_none=True)
@@ -186,20 +194,50 @@ class GenesisTrainer:
             # Scheduler
             lr = self.scheduler.step(self.global_step)
             
+            # --- Performance Precision ---
+            # Isolate the training time for this step
+            self.interval_time += time.time() - step_start
+            
+            # Weighted token counting (Pure LM = 1x seq_len)
+            tokens_this_step = self.config.effective_batch_size * self.config.max_seq_len
+            self.interval_tokens += tokens_this_step
+            # ------------------------------
+
             self.global_step += 1
             
             # Logging
             if self.global_step % self.config.log_interval == 0:
-                dt = time.time() - t0
-                tokens_per_sec = (self.config.effective_batch_size * 512) / dt
-                print(f"Step {self.global_step}: Loss {step_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s")
+                # Optimized throughput (excluded validation/logging/checkpointing lag)
+                tokens_per_sec = self.interval_tokens / max(self.interval_time, 1e-6)
+                
+                # Calculate smoothed ETA (Alpha = 0.2 for smoothing)
+                s_per_step = self.interval_time / self.config.log_interval
+                if self.smoothed_s_per_step is None:
+                    self.smoothed_s_per_step = s_per_step
+                else:
+                    self.smoothed_s_per_step = 0.2 * s_per_step + 0.8 * self.smoothed_s_per_step
+                
+                steps_remaining = self.config.max_steps - self.global_step
+                eta_s = steps_remaining * self.smoothed_s_per_step
+                
+                # Format ETA as HH:MM:SS
+                from datetime import timedelta
+                eta_str = str(timedelta(seconds=int(eta_s)))
+                
+                print(f"Step {self.global_step}/{self.config.max_steps}: Loss {step_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}")
+                
                 self.logger.log_training_step(
                     step=self.global_step,
                     loss=step_loss,
                     learning_rate=lr,
                     tokens_per_sec=tokens_per_sec
                 )
-                t0 = time.time()
+                
+                # Reset interval counters
+                self.interval_tokens = 0
+                self.interval_time = 0.0
+                
+            # Internal step loss is already reset to 0.0 at the start of the while loop
                 
             # 5. Validation
             if self.config.enable_validation and self.global_step % self.config.val_interval == 0:
@@ -280,6 +318,12 @@ class GenesisTrainer:
             'config': asdict(self.config),
             'step': self.global_step
         }
+        
+        # Add model architecture if available
+        if self.arch_config:
+            checkpoint['config'].update(asdict(self.arch_config))
+        elif hasattr(self.model, 'config') and self.model.config:
+            checkpoint['config'].update(asdict(self.model.config))
         
         torch.save(checkpoint, path)
         print(f"Checkpoint saved: {path}")

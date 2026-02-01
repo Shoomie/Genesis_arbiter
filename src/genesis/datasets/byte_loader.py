@@ -40,116 +40,40 @@ class InfiniteGPULoader:
         
         # Compatibility aliases for ProceduralEvaluator
         self.locale_verse_map = self.locale_map
-        self._get_coherence_sample = self._sample_coherence
-        self._get_cross_ref_sample = self._sample_cross_ref
-        self._get_paraphrase_sample = self._sample_paraphrase
+
+        # Pre-compute grid for vectorization
+        self.grid = torch.arange(max_seq_len, device=device).unsqueeze(0) # [1, max_seq_len]
 
     def _sample_lm(self):
-        """Sample batch for Language Modeling."""
-        # Standard causal LM: tokens and labels (shifted)
-        indices = self.rng.randint(0, len(self.verse_indices), size=self.batch_size)
+        """Vectorized sample for Language Modeling."""
+        # 1. Randomly pick batch_size verse indices on GPU
+        verse_idxs = torch.randint(0, len(self.verse_starts), (self.batch_size,), device=self.device)
+        starts = self.verse_starts[verse_idxs]
+        lens = self.verse_lens[verse_idxs]
         
-        batch_tokens = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        batch_labels = torch.full((self.batch_size, self.max_seq_len), -100, dtype=torch.long, device=self.device)
+        # 2. Generate full index matrix [B, L]
+        # Clamp to prevent OOB at the very end of data_tensor
+        max_idx = len(self.data_tensor) - 1
+        indices = torch.clamp(starts.unsqueeze(1) + self.grid, 0, max_idx)
         
-        for i, idx in enumerate(indices):
-            start = self.verse_starts[idx]
-            length = min(self.verse_lens[idx], self.max_seq_len)
-            
-            chunk = self.data_tensor[start : start + length]
-            batch_tokens[i, :length] = chunk
-            
-            if length > 1:
-                batch_labels[i, :length-1] = chunk[1:]
-                # We could set the last token label to something, but -100 is safe
-                
+        # 3. Gather tokens
+        batch_tokens = self.data_tensor[indices]
+        
+        # 4. Mask labels (shifted)
+        # mask is True where we are inside the verse bounds
+        mask = self.grid < lens.unsqueeze(1)
+        
+        batch_labels = torch.full_like(batch_tokens, -100)
+        # Shift tokens for labels: labels[i] = tokens[i+1]
+        # Only valid if the next token is ALSO within the verse mask
+        valid_label_mask = mask[:, 1:] 
+        batch_labels[:, :-1] = torch.where(valid_label_mask, batch_tokens[:, 1:], -100)
+        
+        # Final cleanup: zerout tokens outside verse (optional but cleaner)
+        batch_tokens = torch.where(mask, batch_tokens, 0)
+        
         return {"task": "lm", "tokens": batch_tokens, "labels": batch_labels}
-
-    def _sample_coherence(self):
-        """Sample batch for Coherence detection."""
-        is_coherent = self.rng.rand(self.batch_size) < 0.5
-        
-        v1_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        v2_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        labels = torch.zeros(self.batch_size, dtype=torch.float32, device=self.device)
-        
-        for i in range(self.batch_size):
-            if is_coherent[i]:
-                idx1 = self.rng.randint(0, len(self.verse_indices) - 1)
-                idx2 = idx1 + 1
-                labels[i] = 1.0
-            else:
-                idx1, idx2 = self.rng.choice(len(self.verse_indices), size=2, replace=False)
-                labels[i] = 0.0
-                
-            l1 = min(self.verse_lens[idx1], self.max_seq_len)
-            l2 = min(self.verse_lens[idx2], self.max_seq_len)
-            
-            v1_batch[i, :l1] = self.data_tensor[self.verse_starts[idx1] : self.verse_starts[idx1] + l1]
-            v2_batch[i, :l2] = self.data_tensor[self.verse_starts[idx2] : self.verse_starts[idx2] + l2]
-            
-        return {"task": "coherence", "verse1_tokens": v1_batch, "verse2_tokens": v2_batch, "labels": labels}
-
-    def _sample_cross_ref(self):
-        """Sample batch for Cross-Reference prediction."""
-        anchor_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        pos_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        neg_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        
-        for i in range(self.batch_size):
-            a_idx = self.rng.randint(0, len(self.verse_indices))
-            p_idx = max(0, min(len(self.verse_indices) - 1, a_idx + self.rng.randint(-5, 6)))
-            n_idx = self.rng.randint(0, len(self.verse_indices))
-            while abs(n_idx - a_idx) < 100:
-                n_idx = self.rng.randint(0, len(self.verse_indices))
-                
-            la = min(self.verse_lens[a_idx], self.max_seq_len)
-            lp = min(self.verse_lens[p_idx], self.max_seq_len)
-            ln = min(self.verse_lens[n_idx], self.max_seq_len)
-            
-            anchor_batch[i, :la] = self.data_tensor[self.verse_starts[a_idx] : self.verse_starts[a_idx] + la]
-            pos_batch[i, :lp] = self.data_tensor[self.verse_starts[p_idx] : self.verse_starts[p_idx] + lp]
-            neg_batch[i, :ln] = self.data_tensor[self.verse_starts[n_idx] : self.verse_starts[n_idx] + ln]
-            
-        return {"task": "cross_ref", "anchor_tokens": anchor_batch, "positive_tokens": pos_batch, "negative_tokens": neg_batch}
-
-    def _sample_paraphrase(self):
-        """Sample batch for Cross-Lingual Paraphrase."""
-        locales = list(self.locale_map.keys())
-        if len(locales) < 2:
-            return self._sample_coherence()
-            
-        is_para = self.rng.rand(self.batch_size) < 0.5
-        v1_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        v2_batch = torch.zeros((self.batch_size, self.max_seq_len), dtype=torch.long, device=self.device)
-        labels = torch.zeros(self.batch_size, dtype=torch.float32, device=self.device)
-        
-        for i in range(self.batch_size):
-            lang1, lang2 = self.rng.choice(locales, size=2, replace=False)
-            idx_list1 = self.locale_map[lang1]
-            idx_list2 = self.locale_map[lang2]
-            
-            if is_para[i]:
-                common_len = min(len(idx_list1), len(idx_list2))
-                k = self.rng.randint(0, common_len)
-                idx1, idx2 = idx_list1[k], idx_list2[k]
-                labels[i] = 1.0
-            else:
-                k1, k2 = self.rng.randint(0, len(idx_list1)), self.rng.randint(0, len(idx_list2))
-                while k1 == k2: k2 = self.rng.randint(0, len(idx_list2))
-                idx1, idx2 = idx_list1[k1], idx_list2[k2]
-                labels[i] = 0.0
-                
-            l1, l2 = min(self.verse_lens[idx1], self.max_seq_len), min(self.verse_lens[idx2], self.max_seq_len)
-            v1_batch[i, :l1] = self.data_tensor[self.verse_starts[idx1] : self.verse_starts[idx1] + l1]
-            v2_batch[i, :l2] = self.data_tensor[self.verse_starts[idx2] : self.verse_starts[idx2] + l2]
-            
-        return {"task": "paraphrase", "verse1_tokens": v1_batch, "verse2_tokens": v2_batch, "labels": labels}
 
     def __iter__(self):
         while True:
-            task = self.rng.choice(self.tasks, p=self.task_probs)
-            if task == 'lm': yield self._sample_lm()
-            elif task == 'coherence': yield self._sample_coherence()
-            elif task == 'cross_ref': yield self._sample_cross_ref()
-            elif task == 'paraphrase': yield self._sample_paraphrase()
+            yield self._sample_lm()

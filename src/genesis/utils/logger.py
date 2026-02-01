@@ -65,9 +65,9 @@ class ExperimentConfig:
             weight_decay=config.get('training', {}).get('weight_decay', 0.0),
             learning_rate=config.get('training', {}).get('learning_rate', 0.0),
             batch_size=config.get('training', {}).get('batch_size', 0),
-            seq_len=config.get('training', {}).get('seq_len', 0),
+            seq_len=config.get('training', {}).get('max_seq_len', 0),
             warmup_steps=config.get('training', {}).get('warmup_steps', 0),
-            max_steps=config.get('training', {}).get('steps', 0),
+            max_steps=config.get('training', {}).get('max_steps', 0),
             timestamp=datetime.now().isoformat()
         )
 

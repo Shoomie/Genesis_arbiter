@@ -37,20 +37,30 @@ project_root = current_dir.parent
 sys.path.append(str(project_root / "src"))
 
 # Genesis Imports
-from genesis.config import get_config_section
+from genesis.utils.config_loader import get_config_section
 from genesis.models.tokenizer import GenesisTokenizer
 from genesis.models.llama.model import Llama
 from genesis.models.multi_task_wrapper import MultiTaskLlama
 
+def print_header():
+    """Print the interactive chat header."""
+    print("\n" + "="*60)
+    print("  G E N E S I S   I N T E R A C T I V E   C H A T")
+    print("="*60)
+    print("  Byte-Level UTF-8 Inference Pipeline | PyTorch 2.6 Ready")
+    print("="*60 + "\n")
+
 def get_checkpoints():
-    """List valid checkpoints in checkpoints/."""
-    base_dir = project_root / "checkpoints"
-    if not base_dir.exists():
-        base_dir.mkdir(parents=True, exist_ok=True)
-        return []
-        
-    # Get all .pt files
-    files = list(base_dir.glob("*.pt"))
+    """List valid checkpoints in various common directories."""
+    search_paths = [
+        project_root / "src" / "genesis" / "checkpoints" / "test",
+    ]
+    
+    files = []
+    for base_dir in search_paths:
+        if base_dir.exists():
+            files.extend(list(base_dir.glob("*.pt")))
+    
     # Sort by modification time (newest first)
     files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     return files
@@ -82,86 +92,86 @@ def load_model(checkpoint_path, device):
                 "max_seq_len": 512
             }
 
-        # 2. Load Tokenizer (REQUIRED for vocab_size)
-        # Try to find tokenizer in data/ directory first
-        tokenizer_path = project_root / "data" / "genesis_char_tokenizer.json"
-        if not tokenizer_path.exists():
-             # Fallback to root
-             tokenizer_path = project_root / "genesis_tokenizer.json"
-             
-        if tokenizer_path.exists():
-            print(f"  Loading tokenizer from {tokenizer_path.name}...")
-            tokenizer = GenesisTokenizer(str(tokenizer_path))
-        else:
-            print("[ERROR] Tokenizer file not found!")
+        # 2. Load Tokenizer
+        # Check vocab size from state dict to decide tokenizer type
+        sd = checkpoint.get('model_state_dict', checkpoint.get('model', {}))
+        if not sd:
+            print("[ERROR] No model state dict found in checkpoint!")
             return None, None
-            
-        print(f"  Model Config: Dim={config.get('dim')}, Layers={config.get('n_layers')}")
-        
-        # 3. Initialize Model
-        # We only pass keys that Llama.__init__ actually accepts
-        llama_keys = {'vocab_size', 'n_layers', 'dim', 'n_heads', 'intermediate_size', 'max_seq_len', 'norm_type'}
-        model_init_config = {k: v for k, v in config.items() if k in llama_keys}
-        
-        # Determine vocab_size strictly from state_dict to avoid mismatches
-        sd = checkpoint['model']
+
         if 'base.tok_embeddings.weight' in sd:
             checkpoint_vocab_size = sd['base.tok_embeddings.weight'].shape[0]
         elif 'tok_embeddings.weight' in sd:
             checkpoint_vocab_size = sd['tok_embeddings.weight'].shape[0]
         else:
-            checkpoint_vocab_size = config.get('vocab_size', tokenizer.vocab_size)
-            
-        model_init_config['vocab_size'] = checkpoint_vocab_size
-        
-        # Synchronize tokenizer if vocab_size is compressed
-        if model_init_config['vocab_size'] < tokenizer.vocab_size:
-            print(f"  [!] Checkpoint has compressed vocab ({model_init_config['vocab_size']})")
-            print(f"      Attempting to synchronize tokenizer...")
-            
-            # Try to determine language from config or filename
-            target_langs = config.get('target_languages')
-            if not target_langs:
-                # Guess from filename (e.g., step_500en.pt -> en)
-                import re
-                match = re.search(r'_([a-z]{2,3})\.pt$', checkpoint_path.name)
-                if match:
-                    target_langs = [match.group(1)]
-                    print(f"      Inferred language from filename: {target_langs}")
-            
-            if target_langs:
-                # Check root/Bible first, then engine/Bible, then parent/Bible
-                bible_dir = project_root / "Bible"
-                if not bible_dir.exists():
-                    bible_dir = project_root / "engine" / "Bible"
-                if not bible_dir.exists():
-                    bible_dir = project_root.parent / "Bible"
+            checkpoint_vocab_size = config.get('vocab_size', 260)
+
+        if checkpoint_vocab_size == 260:
+            print("  Detected Byte-Level UTF-8 Model. Initializing ByteTokenizer...")
+            tokenizer = GenesisTokenizer(type='byte')
+        else:
+            # Fallback to character/BPE
+            tokenizer_path = project_root / "data" / "genesis_char_tokenizer.json"
+            if not tokenizer_path.exists():
+                tokenizer_path = project_root / "genesis_tokenizer.json"
                 
-                if bible_dir.exists():
-                    print(f"      Reconstructing vocabulary mapping for {target_langs}...")
-                    try:
-                        from genesis.datasets.multi_task_sampler import MultiTaskDataset
-                        # Create a dummy dataset to trigger compression logic
-                        ds = MultiTaskDataset(
-                            bible_data_dir=str(bible_dir),
-                            tokenizer=tokenizer,
-                            device=torch.device('cpu'),
-                            target_languages=target_langs
-                        )
-                        print(f"      [OK] Tokenizer synchronized (New vocab: {tokenizer.vocab_size})")
-                    except Exception as e:
-                        print(f"      [WARN] Failed to synchronize tokenizer: {e}")
-                else:
-                    print(f"      [WARN] Bible data not found at {bible_dir}. Generation might fail.")
+            if tokenizer_path.exists():
+                print(f"  Loading character/BPE tokenizer from {tokenizer_path.name}...")
+                tokenizer = GenesisTokenizer(str(tokenizer_path))
             else:
-                 print(f"      [WARN] Could not determine language for compression. Generation might fail.")
+                print("[WARN] No tokenizer file found. Defaulting to ByteTokenizer (might mismatch vocab).")
+                tokenizer = GenesisTokenizer(type='byte')
+
+        print(f"  Model Config: Dim={config.get('dim')}, Layers={config.get('n_layers')}, Vocab={checkpoint_vocab_size}")
         
-        # Ensure other essential params are present
-        if 'dim' not in model_init_config: model_init_config['dim'] = 512
-        if 'n_layers' not in model_init_config: model_init_config['n_layers'] = 8
-        if 'n_heads' not in model_init_config: model_init_config['n_heads'] = 8
+        # 3. Initialize Model
+        # CRITICAL: If config is missing architecture, infer from state_dict
+        sd = checkpoint.get('model_state_dict', checkpoint.get('model', {}))
         
-        print(f"  Final Model Config: Dim={model_init_config.get('dim')}, Layers={model_init_config.get('n_layers')}, Vocab={model_init_config['vocab_size']}")
+        # Infer layers
+        if 'n_layers' not in config:
+            layer_keys = [k for k in sd.keys() if 'layers.' in k]
+            if layer_keys:
+                max_layer = max([int(k.split('layers.')[1].split('.')[0]) for k in layer_keys])
+                config['n_layers'] = max_layer + 1
+                print(f"  [AUTO] Inferred n_layers: {config['n_layers']}")
+        
+        # Infer dim
+        if 'dim' not in config:
+            if 'base.tok_embeddings.weight' in sd:
+                config['dim'] = sd['base.tok_embeddings.weight'].shape[1]
+            elif 'tok_embeddings.weight' in sd:
+                config['dim'] = sd['tok_embeddings.weight'].shape[1]
+            if 'dim' in config:
+                print(f"  [AUTO] Inferred dim: {config['dim']}")
+        
+        # Infer intermediate_size
+        if 'intermediate_size' not in config:
+            ffn_keys = [k for k in sd.keys() if 'feed_forward.w1.weight' in k]
+            if ffn_keys:
+                config['intermediate_size'] = sd[ffn_keys[0]].shape[0]
+                print(f"  [AUTO] Inferred intermediate_size: {config['intermediate_size']}")
+        
+        # Infer norm_type
+        if 'norm_type' not in config:
+            if any('.attention_norm.norm.' in k for k in sd.keys()):
+                config['norm_type'] = "deepnorm"
+            else:
+                config['norm_type'] = "rmsnorm"
+            print(f"  [AUTO] Inferred norm_type: {config['norm_type']}")
+
+        # Ensure essential params are present with defaults if still missing
+        if 'dim' not in config: config['dim'] = 512
+        if 'n_layers' not in config: config['n_layers'] = 8
+        if 'n_heads' not in config: config['n_heads'] = 8
+        if 'intermediate_size' not in config: config['intermediate_size'] = 3072
+
+        print(f"  Final Model Config: Dim={config.get('dim')}, Layers={config.get('n_layers')}, Vocab={checkpoint_vocab_size}, Norm={config.get('norm_type')}")
+        
+        # Filter for Llama.__init__ keys
+        llama_keys = {'vocab_size', 'n_layers', 'dim', 'n_heads', 'intermediate_size', 'max_seq_len', 'norm_type'}
+        model_init_config = {k: v for k, v in config.items() if k in llama_keys}
+        model_init_config['vocab_size'] = checkpoint_vocab_size
         
         # Initialize Base Llama
         base_model = Llama(**model_init_config)
@@ -174,7 +184,7 @@ def load_model(checkpoint_path, device):
         )
         
         # Load state dict
-        sd = checkpoint['model']
+        sd = checkpoint.get('model_state_dict', checkpoint.get('model'))
         
         # CRITICAL FIX: The base model's 'output' layer might not have been trained 
         # (MultiTaskLlama uses 'lm_head'). If weights are not tied in the checkpoint,
@@ -233,10 +243,9 @@ def generate_response(model, tokenizer, prompt, device, max_new_tokens=300, temp
             # Append
             generated = torch.cat((generated, next_token), dim=1)
             
-            # Stop if EOS (assuming 0 is PAD/EOS for now, or check tokenizer)
-            if next_token.item() == 0: # 1 is usually EOS, 0 PAD. GenesisTokenizer likely uses 2 for EOS? 
-                # Let's check genesis_tokenizer.json manually if this persists.
-                # Usually standard sentencepiece is 1=BOS, 2=EOS.
+            # Stop if EOS
+            eos_id = getattr(tokenizer, 'eos_id', 2) # GenesisTokenizer usually has .eos_id
+            if next_token.item() == eos_id:
                 break
                 
     # Decode
@@ -277,7 +286,7 @@ def main(initial_temp=None, initial_max_tokens=None, force_device=None):
     checkpoints = get_checkpoints()
     
     if not checkpoints:
-        print("[!] No checkpoints found in engine/checkpoints/test/")
+        print("[!] No checkpoints found in common search paths (src/genesis/checkpoints/test, checkpoints/)")
         return
         
     print("Available Checkpoints:")

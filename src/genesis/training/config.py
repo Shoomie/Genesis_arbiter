@@ -16,6 +16,7 @@ class ModelConfig:
     vocab_size: int = 260
     intermediate_size: int = 2048
     norm_type: str = "deepnorm"
+    max_seq_len: int = 1024
     
     def merge(self, other_dict: Dict[str, Any]) -> 'ModelConfig':
         """Merge values from a dictionary into a new ModelConfig instance."""

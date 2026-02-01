@@ -99,12 +99,15 @@ class GenesisTokenizer:
     def __init__(self, tokenizer_path=None, type=None):
         self.tokenizer_path = tokenizer_path
         self.tokenizer_type = type
-        
         if type == 'byte':
             self.tokenizer = ByteTokenizer()
             self.tokenizer_type = 'byte'
             self.vocab_size = self.tokenizer.vocab_size
             self.mask_id = self.tokenizer.mask_id
+            self.bos_id = self.tokenizer.bos_id
+            self.eos_id = self.tokenizer.eos_id
+            self.pad_id = self.tokenizer.pad_id
+            self.unk_id = self.tokenizer.unk_id
             return
 
         if not tokenizer_path:
@@ -113,6 +116,10 @@ class GenesisTokenizer:
             self.tokenizer_type = 'byte'
             self.vocab_size = self.tokenizer.vocab_size
             self.mask_id = self.tokenizer.mask_id
+            self.bos_id = self.tokenizer.bos_id
+            self.eos_id = self.tokenizer.eos_id
+            self.pad_id = self.tokenizer.pad_id
+            self.unk_id = self.tokenizer.unk_id
             return
             
         # Load and detect tokenizer type from file
@@ -124,6 +131,11 @@ class GenesisTokenizer:
                 self.tokenizer_type = 'byte'
                 self.tokenizer = ByteTokenizer()
                 self.vocab_size = self.tokenizer.vocab_size
+                self.mask_id = self.tokenizer.mask_id
+                self.bos_id = self.tokenizer.bos_id
+                self.eos_id = self.tokenizer.eos_id
+                self.pad_id = self.tokenizer.pad_id
+                self.unk_id = self.tokenizer.unk_id
             elif config.get('type') == 'CharacterLevel' or config.get('model', {}).get('type') == 'CharacterLevel':
                 self.tokenizer_type = 'character'
                 self._init_char_tokenizer(config)
