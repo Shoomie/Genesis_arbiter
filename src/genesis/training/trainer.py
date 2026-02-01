@@ -73,11 +73,11 @@ class GenesisTrainer:
         
         # Compilation
         if config.compile_model:
-            print("Compiling model (torch.compile)...")
+            print(f"  [SYSTEM] Compiling model (torch.compile)...")
             try:
                 self.model = torch.compile(self.model)
             except Exception as e:
-                print(f"Compilation warning: {e}")
+                print(f"  [WARN] Compilation failed: {e}")
                 
         # Logging
         self.logger = ArbiterLogger(
@@ -99,6 +99,7 @@ class GenesisTrainer:
                 "device": config.device
             }
         }
+        # Start logger silently
         self.logger.start_experiment(logger_config)
         
         # Callbacks
@@ -113,10 +114,31 @@ class GenesisTrainer:
         self.global_step = 0
         self.best_val_loss = float('inf')
         
+        # Display model info on init if requested or standard
+        self._print_startup_banner()
+
+    def _print_startup_banner(self):
+        """Print a clean summary of the training session."""
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        
+        # Estimate size based on precision
+        param_bytes = 4 if self.config.precision == "fp32" else 2
+        model_size_mb = total_params * param_bytes / (1024**2)
+        
+        print("\n" + "="*60)
+        print(f"  G E N E S I S   T R A I N E R")
+        print("="*60)
+        print(f"  [ARCH]  {self.config.precision.upper()} | {getattr(self.model.base, 'n_layers', 0)} Layers | {getattr(self.model.base, 'dim', 0)} Dim")
+        print(f"  [MODEL] Parameters: {total_params/1e6:.2f}M ({trainable_params/1e6:.2f}M trainable)")
+        print(f"  [MODEL] Estimated Weight Size: {model_size_mb:.2f} MB")
+        print(f"  [DATA]  Batch Size: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
+        print(f"  [DATA]  Seq Length: {self.config.max_seq_len}")
+        print(f"  [TRAIN] Device: {self.device} | Steps: {self.config.max_steps}")
+        print("="*60 + "\n")
+
     def train(self):
         """Execute the training loop."""
-        print(f"Starting training on {self.device} for {self.config.max_steps} steps...")
-        print(f"Effective batch size: {self.config.effective_batch_size}")
         print_flash_attention_status()
         
         self.model.train()
@@ -124,6 +146,8 @@ class GenesisTrainer:
         
         # Infinite iterator
         data_iter = iter(self.train_loader)
+        
+        print(f"  [RUN] Training loop engaged. Monitoring diagnostics...")
         
         while self.global_step < self.config.max_steps:
             # Training step

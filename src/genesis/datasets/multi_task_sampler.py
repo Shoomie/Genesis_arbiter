@@ -290,8 +290,8 @@ class MultiTaskDataset(Dataset):
                 with open(bible_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
-                # Only use complete translations (1188-1189 chapters)
-                if len(data) >= 1188:
+                # Only use complete translations (1189 chapters)
+                if len(data) == 1189:
                     translations[locale_dir.name] = data
                 else:
                     incomplete_count += 1
@@ -303,7 +303,7 @@ class MultiTaskDataset(Dataset):
         # Report statistics
         total_found = len(translations) + incomplete_count
         print(f"  Found {total_found} translation directories")
-        print(f"  [OK] Loaded {len(translations)} complete translations (>=1188 chapters each)")
+        print(f"  [OK] Loaded {len(translations)} complete translations (1189 chapters each)")
         
         if incomplete_count > 0:
             print(f"  [SKIP] Skipped {incomplete_count} incomplete translations (still being scraped)")

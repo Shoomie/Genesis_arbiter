@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Config
 from genesis.training.config import TrainingConfig, ModelConfig
-from genesis.utils.config_loader import get_config_section, resolve_vocab_size, get_data_path
+from genesis.utils.config_loader import get_config_section, get_data_path
 
 # Trainer
 from genesis.training.trainer import GenesisTrainer
@@ -27,14 +27,22 @@ from genesis.models.tokenizer import GenesisTokenizer
 from genesis.datasets.multi_task_sampler import get_multi_task_dataloader
 from genesis.training.flash_attention_config import print_flash_attention_status
 
+# Define global architectural presets
+ARCH_PRESETS = {
+    "microscope": ModelConfig(dim=288, n_layers=144, n_heads=12, intermediate_size=768, vocab_size=260, norm_type="deepnorm"),
+    "deep_narrow_40": ModelConfig(dim=384, n_layers=40, n_heads=12, intermediate_size=1536, vocab_size=260, norm_type="deepnorm"),
+    "standard": ModelConfig(dim=512, n_layers=12, n_heads=8, intermediate_size=2048, vocab_size=260, norm_type="deepnorm")
+}
+
 def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, ModelConfig]:
     """Load settings from genesis_config.toml and override with args."""
     
-    # 1. Load TOML defaults
+    # 1. Load TOML sections
     train_cfg_dict = get_config_section("training")
     sys_cfg_dict = get_config_section("system")
     eval_cfg_dict = get_config_section("evaluation")
     data_cfg_dict = get_config_section("data")
+    model_cfg_dict = get_config_section("model")
     
     # Merge into a single dict for TrainingConfig
     merged_config = {}
@@ -43,74 +51,45 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     merged_config.update(eval_cfg_dict)
     merged_config.update(data_cfg_dict)
 
-    # 1b. Load model section for specific resolution
-    model_cfg_dict = get_config_section("model")
-
-    # Create config object for resolution
-    structured_config = {
-        "model": model_cfg_dict,
-        "data": data_cfg_dict,
-        "training": train_cfg_dict
-    }
-    
-    # Ensure vocab_size is present and set to 'auto' if missing
-    if "vocab_size" not in structured_config["model"]:
-        structured_config["model"]["vocab_size"] = "auto"
-    
-    # Resolve
-    resolved = resolve_vocab_size(structured_config)
-    resolved_vocab_size = resolved["model"].get("vocab_size")
-    
-    # Merge resolved back into flat config if needed, or just set it on ModelConfig
-    if resolved_vocab_size:
-        merged_config["vocab_size"] = resolved_vocab_size
-        model_cfg_dict["vocab_size"] = resolved_vocab_size
-
     # Create Objects
     train_config = TrainingConfig.from_dict(merged_config)
     
-    # For ModelConfig, merge CLI overrides if any? (CLI doesn't usually set dims)
-    # But we should rely on TOML [model] + dynamic logical
-    model_config = ModelConfig.from_dict(model_cfg_dict)
+    # Merge CLI overrides for training
+    if args.learning_rate: train_config.learning_rate = args.learning_rate
+    if args.batch_size: train_config.batch_size = args.batch_size
+    if args.steps: train_config.max_steps = args.steps
+    if args.val_interval: train_config.val_interval = args.val_interval
+    if args.eval_interval: train_config.eval_interval = args.eval_interval
+    
+    # --- Model Resolution ---
+    # Start with standard fallback
+    mode = args.mode or train_cfg_dict.get("mode", "standard")
+    base_cfg = ARCH_PRESETS.get(mode, ARCH_PRESETS["standard"])
+    
+    # Override with [model] section from TOML
+    model_config = base_cfg.merge(model_cfg_dict)
     
     return train_config, model_config
 
-def get_model(mode: str, device: str, vocab_size: Optional[int] = None) -> MultiTaskLlama:
-    """Initialize the model architecture."""
-    # Define architectures
-    archs = {
-        "microscope": ModelConfig(dim=144, n_layers=144, n_heads=12, intermediate_size=1536, vocab_size=0),
-        "deep_narrow_40": ModelConfig(dim=384, n_layers=40, n_heads=12, intermediate_size=1536, vocab_size=0),
-        "standard": ModelConfig(dim=512, n_layers=12, n_heads=8, intermediate_size=2048, vocab_size=0)
-    }
-    
-    if mode not in archs:
-        print(f"Warning: Unknown mode '{mode}', defaulting to 'standard'")
-        mode = "standard"
-        
-    cfg = archs[mode]
-    
-    if vocab_size is not None:
-        print(f"[Model] Overriding vocab_size {cfg.vocab_size} -> {vocab_size}")
-        cfg.vocab_size = vocab_size
-    
+def get_model(config: ModelConfig, device: str) -> MultiTaskLlama:
+    """Initialize the model architecture from a ModelConfig."""
     
     # Base Llama
     base_model = Llama(
-        vocab_size=cfg.vocab_size,
-        n_layers=cfg.n_layers,
-        dim=cfg.dim,
-        n_heads=cfg.n_heads,
-        intermediate_size=cfg.intermediate_size,
+        vocab_size=config.vocab_size,
+        n_layers=config.n_layers,
+        dim=config.dim,
+        n_heads=config.n_heads,
+        intermediate_size=config.intermediate_size,
         max_seq_len=1024,
-        norm_type=cfg.norm_type
+        norm_type=config.norm_type
     )
     
     # Multi-Task Wrapper
     model = MultiTaskLlama(
         base_model,
-        dim=cfg.dim,
-        vocab_size=cfg.vocab_size
+        dim=config.dim,
+        vocab_size=config.vocab_size
     )
     
     return model
@@ -133,30 +112,28 @@ def main():
     
     # 1. Load Configuration
     train_config, model_config = load_global_config_into_training_config(args)
-    print(f"Loaded Configuration:\n{train_config}")
+    # Silent config load, only error if something is wrong
     
     # 2. Tokenizer & Data Loader (VRAM Resident)
-    print("Initializing Byte-Level GPU Data Pipeline...")
+    print("  [PIPELINE] Initializing Byte-Level GPU Data Pipeline...")
     
     try:
         cache_path = get_data_path("cache_path")
         if not cache_path.exists():
-            print(f"[ERROR] Data cache not found at {cache_path}. Please run option 3c first.")
+            print(f"  [ERROR] Data cache not found at {cache_path}. Run option 3c first.")
             return
             
-        print(f"Loading pre-tokenized data from {cache_path}...")
         cache_data = torch.load(cache_path, map_location='cpu')
         
         # Auto-detect languages
         languages = list(cache_data['locale_map'].keys())
-        print(f"[DATA] Detected languages in cache: {', '.join(languages)}")
+        print(f"  [DATA] Detected languages: {', '.join(languages)}")
         
         # Initialize Tokenizer (Always Byte-Level for this pipeline)
         tokenizer = GenesisTokenizer(type='byte')
         
         # Override vocab size in model config based on tokenizer
         model_config.vocab_size = tokenizer.vocab_size
-        print(f"[TOKENIZER] Byte-level vocab size: {model_config.vocab_size}")
         
         # Load task distribution
         task_dist = get_config_section("tasks") or {
@@ -176,14 +153,19 @@ def main():
         )
         
     except Exception as e:
-        print(f"[ERROR] Failed to initialize data pipeline: {e}")
+        print(f"  [ERROR] Data pipeline failure: {e}")
         import traceback
         traceback.print_exc()
         return
     
     # 3. Model
-    print(f"Initializing Model ({args.mode})...")
-    model = get_model(args.mode, train_config.device, vocab_size=model_config.vocab_size)
+    print(f"  [MODEL] Initializing {args.mode.upper() if args.mode else 'TOML'} architecture...")
+    model = get_model(model_config, train_config.device)
+    
+    # Enable gradient checkpointing if configured
+    if train_config.gradient_checkpointing or args.gradient_checkpointing:
+        print("  [SYSTEM] Gradient Checkpointing enabled.")
+        model.base.gradient_checkpointing_enable()
     
     # 4. Trainer
     trainer = GenesisTrainer(

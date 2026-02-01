@@ -10,12 +10,20 @@ from typing import Optional, Dict, Any, List
 @dataclass
 class ModelConfig:
     """Configuration for the model architecture."""
-    dim: int
-    n_layers: int
-    n_heads: int
-    vocab_size: int
-    intermediate_size: int
-    norm_type: str = "layernorm"
+    dim: int = 512
+    n_layers: int = 12
+    n_heads: int = 8
+    vocab_size: int = 260
+    intermediate_size: int = 2048
+    norm_type: str = "deepnorm"
+    
+    def merge(self, other_dict: Dict[str, Any]) -> 'ModelConfig':
+        """Merge values from a dictionary into a new ModelConfig instance."""
+        base_dict = asdict(self)
+        for k, v in other_dict.items():
+            if k in base_dict and v is not None:
+                base_dict[k] = v
+        return ModelConfig(**base_dict)
     
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'ModelConfig':

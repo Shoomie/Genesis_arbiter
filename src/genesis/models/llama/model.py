@@ -141,6 +141,8 @@ class Llama(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
         self.n_layers = n_layers
+        self.dim = dim
+        self.n_heads = n_heads
         self.norm_type = norm_type
         
         self.tok_embeddings = nn.Embedding(vocab_size, dim)
