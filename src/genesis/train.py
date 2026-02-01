@@ -56,6 +56,7 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     
     # Merge CLI overrides for training
     if args.learning_rate: train_config.learning_rate = args.learning_rate
+    if args.weight_decay: train_config.weight_decay = args.weight_decay
     if args.batch_size: train_config.batch_size = args.batch_size
     if args.steps: train_config.max_steps = args.steps
     if args.val_interval: train_config.val_interval = args.val_interval
@@ -118,6 +119,7 @@ def main():
     
     # Hyperparam overrides
     parser.add_argument("--lr", type=float, dest="learning_rate")
+    parser.add_argument("--weight-decay", type=float)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--val-interval", type=int)
@@ -156,8 +158,8 @@ def main():
         }
         
         # Initialize GPU-Resident Loader
-        from genesis.datasets.byte_loader import InfiniteGPULoader
-        train_loader = InfiniteGPULoader(
+        from genesis.datasets.byte_loader import InfiniteGPULoader, BackgroundPrefetcher
+        raw_loader = InfiniteGPULoader(
             data_tensor=cache_data['tokens'],
             verse_indices=cache_data['indices'],
             locale_map=cache_data['locale_map'],
@@ -166,6 +168,7 @@ def main():
             task_distribution=task_dist,
             device=torch.device(train_config.device)
         )
+        train_loader = BackgroundPrefetcher(raw_loader)
         
     except Exception as e:
         print(f"  [ERROR] Data pipeline failure: {e}")

@@ -154,7 +154,7 @@ class Llama(nn.Module):
         # Final norm (always RMSNorm, even for DeepNorm models)
         self.norm = RMSNorm(dim)
         self.output = nn.Linear(dim, vocab_size, bias=False)
-        self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2)
+        self.register_buffer("freqs_cis", precompute_freqs_cis(dim // n_heads, max_seq_len * 2), persistent=False)
         self.gradient_checkpointing = False
 
     def gradient_checkpointing_enable(self):
@@ -163,7 +163,6 @@ class Llama(nn.Module):
     def forward(self, tokens, labels=None, return_hiddens=False):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
-        self.freqs_cis = self.freqs_cis.to(h.device)
         freqs_cis = self.freqs_cis[:seqlen]
         
         for layer in self.layers:

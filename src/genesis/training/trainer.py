@@ -51,12 +51,14 @@ class GenesisTrainer:
         self.model.to(self.device)
         
         # Optimizer
+        use_fused = self.device.type == 'cuda'
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
             betas=(0.9, 0.95),
-            eps=1e-8
+            eps=1e-8,
+            fused=use_fused
         )
         
         # Scheduler
@@ -120,6 +122,7 @@ class GenesisTrainer:
         self.interval_tokens = 0
         self.interval_time = 0.0
         self.smoothed_s_per_step = None
+        self.vram_warned = False
         
         # Display model info on init if requested or standard
         self._print_startup_banner()
@@ -141,6 +144,7 @@ class GenesisTrainer:
         print(f"  [MODEL] Estimated Weight Size: {model_size_mb:.2f} MB")
         print(f"  [DATA]  Batch Size: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
         print(f"  [DATA]  Seq Length: {self.config.max_seq_len}")
+        print(f"  [TRAIN] LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
         print(f"  [TRAIN] Device: {self.device} | Steps: {self.config.max_steps}")
         print("="*60 + "\n")
 
@@ -159,7 +163,7 @@ class GenesisTrainer:
         while self.global_step < self.config.max_steps:
             step_start = time.time()
             # Training step
-            step_loss = 0.0
+            step_loss = torch.tensor(0.0, device=self.device)
             self.optimizer.zero_grad(set_to_none=True)
             
             for _ in range(self.config.grad_accum_steps):
@@ -169,20 +173,14 @@ class GenesisTrainer:
                     data_iter = iter(self.train_loader)
                     batch = next(data_iter)
                 
-                # Move all tensors in batch to device
-                for k, v in batch.items():
-                    if isinstance(v, torch.Tensor):
-                        batch[k] = v.to(self.device, non_blocking=True)
-                
                 # Context for precision
                 with autocast(device_type=self.device.type, dtype=self._get_dtype()):
                     # MultiTaskLlama returns (outputs, loss, task_name)
                     # We only need loss for backward, but we could log task_name
                     outputs, loss, task_name = self.model(batch)
                     scaled_loss = loss / self.config.grad_accum_steps
-                    
-                self.scaler.scale(scaled_loss).backward()
-                step_loss += scaled_loss.item()
+                    self.scaler.scale(scaled_loss).backward()
+                step_loss += scaled_loss.detach()
             
             # Optimization
             self.scaler.unscale_(self.optimizer)
@@ -210,6 +208,9 @@ class GenesisTrainer:
                 # Optimized throughput (excluded validation/logging/checkpointing lag)
                 tokens_per_sec = self.interval_tokens / max(self.interval_time, 1e-6)
                 
+                # Pull loss to CPU only for logging
+                curr_loss = step_loss.item()
+                
                 # Calculate smoothed ETA (Alpha = 0.2 for smoothing)
                 s_per_step = self.interval_time / self.config.log_interval
                 if self.smoothed_s_per_step is None:
@@ -224,13 +225,24 @@ class GenesisTrainer:
                 from datetime import timedelta
                 eta_str = str(timedelta(seconds=int(eta_s)))
                 
-                print(f"Step {self.global_step}/{self.config.max_steps}: Loss {step_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}")
+                print(f"Step {self.global_step}/{self.config.max_steps}: Loss {curr_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}")
                 
+                # Monitor VRAM
+                gpu_mem_gb = 0.0
+                if self.device.type == 'cuda':
+                    gpu_mem_gb = torch.cuda.max_memory_reserved() / (1024**3)
+                    # Proactive VRAM Warning (if > 95% of 12GB)
+                    if not self.vram_warned and gpu_mem_gb > 11.4:
+                        print(f"\n  [CAUTION] VRAM usage is critical ({gpu_mem_gb:.2f} GB).")
+                        print("  Windows driver-level swapping may cause periodic performance dips.")
+                        self.vram_warned = True
+
                 self.logger.log_training_step(
                     step=self.global_step,
-                    loss=step_loss,
+                    loss=curr_loss,
                     learning_rate=lr,
-                    tokens_per_sec=tokens_per_sec
+                    tokens_per_sec=tokens_per_sec,
+                    gpu_memory_gb=gpu_mem_gb
                 )
                 
                 # Reset interval counters

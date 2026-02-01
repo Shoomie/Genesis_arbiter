@@ -25,10 +25,10 @@ stop_sequences = ["\n\n\n"]
 mode = "microscope"
 
 # Optimization Parameters
-learning_rate = 5e-4
-weight_decay = 1
+learning_rate = 2e-4
+weight_decay = 0.15
 max_steps = 200000
-batch_size = 32
+batch_size = 8
 grad_accum_steps = 1
 lr_schedule = "cosine"
 warmup_steps = 1000
@@ -42,12 +42,12 @@ autoresume_best = true
 [model]
 # Default architecture (if not using a preset mode)
 vocab_size = "auto"
-dim = 256
-n_layers = 12
+dim = 128
+n_layers = 10
 n_heads = 4
-intermediate_size = 1024
+intermediate_size = 512
 norm_type = "deepnorm"
-max_seq_len = 2048
+max_seq_len = 16384
 
 [data]
 # Source directories (root-relative)
@@ -84,7 +84,7 @@ precision = "bf16"
 
 # Performance Flags
 compile_model = false
-gradient_checkpointing = true
+gradient_checkpointing = false
 cpu_data = false
 verbose_logging = true
 

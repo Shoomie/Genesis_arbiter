@@ -16,6 +16,7 @@ Key Features:
 import sqlite3
 import json
 import time
+import queue
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
@@ -100,6 +101,8 @@ class ArbiterLogger:
         
         # Thread safety
         self._lock = threading.Lock()
+        self._queue = queue.Queue()
+        self._stop_event = threading.Event()
         
         # TensorBoard
         self.tensorboard_writer = None
@@ -109,6 +112,10 @@ class ArbiterLogger:
         
         # Initialize database
         self._init_database()
+        
+        # Start worker thread
+        self._worker_thread = threading.Thread(target=self._worker, daemon=True)
+        self._worker_thread.start()
         
         # Grokking detection state
         self._grokking_detected = False
@@ -197,12 +204,73 @@ class ArbiterLogger:
     @contextmanager
     def _get_connection(self):
         """Thread-safe database connection context manager."""
-        with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _worker(self):
+        """Background worker to process logging queue."""
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+        
+        while not (self._stop_event.is_set() and self._queue.empty()):
             try:
-                yield conn
-            finally:
-                conn.close()
+                msg = self._queue.get(timeout=1.0)
+                if msg is None: break
+                
+                msg_type = msg.get('type')
+                data = msg.get('data')
+                
+                if msg_type == 'training_step':
+                    cursor.execute("""
+                        INSERT INTO training_logs (
+                            run_id, step, loss, grad_norm, learning_rate,
+                            tokens_per_sec, gpu_memory_gb, timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        data['run_id'], data['step'], data['loss'], 
+                        data['grad_norm'], data['learning_rate'],
+                        data['tokens_per_sec'], data['gpu_memory_gb'], 
+                        data['timestamp']
+                    ))
+                    conn.commit()
+                
+                elif msg_type == 'evaluation':
+                    cursor.execute("""
+                        INSERT INTO evaluation_logs (
+                            run_id, step, train_perplexity, val_perplexity,
+                            theological_score, memorization_score, reasoning_score,
+                            attention_entropy, timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        data['run_id'], data['step'], 
+                        data['train_perplexity'], data['val_perplexity'],
+                        data['theological_score'], data['memorization_score'], 
+                        data['reasoning_score'], data['attention_entropy'], 
+                        data['timestamp']
+                    ))
+                    conn.commit()
+                
+                elif msg_type == 'grokking_signal':
+                    cursor.execute("""
+                        INSERT INTO grokking_signals (
+                            run_id, step, signal_type, value, description, timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        data['run_id'], data['step'], data['signal_type'],
+                        data['value'], data['description'], data['timestamp']
+                    ))
+                    conn.commit()
+                
+                self._queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[ArbiterLogger] Worker error: {e}")
+        
+        conn.close()
     
     def start_experiment(self, config: Dict[str, Any]) -> str:
         """
@@ -259,28 +327,24 @@ class ArbiterLogger:
         tokens_per_sec: Optional[float] = None,
         gpu_memory_gb: Optional[float] = None
     ):
-        """Log training metrics for a single step."""
+        """Log training metrics for a single step (Now Async)."""
         if not self.current_run_id:
             raise RuntimeError("Must call start_experiment() before logging")
         
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO training_logs (
-                    run_id, step, loss, grad_norm, learning_rate,
-                    tokens_per_sec, gpu_memory_gb, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.current_run_id,
-                step,
-                loss,
-                grad_norm,
-                learning_rate,
-                tokens_per_sec,
-                gpu_memory_gb,
-                datetime.now().isoformat()
-            ))
-            conn.commit()
+        # Offload to queue
+        self._queue.put({
+            'type': 'training_step',
+            'data': {
+                'run_id': self.current_run_id,
+                'step': step,
+                'loss': loss,
+                'grad_norm': grad_norm,
+                'learning_rate': learning_rate,
+                'tokens_per_sec': tokens_per_sec,
+                'gpu_memory_gb': gpu_memory_gb,
+                'timestamp': datetime.now().isoformat()
+            }
+        })
         
         # TensorBoard logging
         if self.tensorboard_writer:
@@ -313,32 +377,27 @@ class ArbiterLogger:
         reasoning_score: Optional[float] = None,
         attention_entropy: Optional[float] = None
     ):
-        """Log evaluation metrics."""
+        """Log evaluation metrics (Now Async)."""
         if not self.current_run_id:
             raise RuntimeError("Must call start_experiment() before logging")
         
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO evaluation_logs (
-                    run_id, step, train_perplexity, val_perplexity,
-                    theological_score, memorization_score, reasoning_score,
-                    attention_entropy, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.current_run_id,
-                step,
-                train_perplexity,
-                val_perplexity,
-                theological_score,
-                memorization_score,
-                reasoning_score,
-                attention_entropy,
-                datetime.now().isoformat()
-            ))
-            conn.commit()
+        # Offload to queue
+        self._queue.put({
+            'type': 'evaluation',
+            'data': {
+                'run_id': self.current_run_id,
+                'step': step,
+                'train_perplexity': train_perplexity,
+                'val_perplexity': val_perplexity,
+                'theological_score': theological_score,
+                'memorization_score': memorization_score,
+                'reasoning_score': reasoning_score,
+                'attention_entropy': attention_entropy,
+                'timestamp': datetime.now().isoformat()
+            }
+        })
         
-        # TensorBoard logging
+        # TensorBoard logging (synchronous on main thread is fine for eval which is rare)
         if self.tensorboard_writer:
             if val_perplexity is not None:
                 self.tensorboard_writer.add_scalar('Eval/Perplexity', val_perplexity, step)
@@ -383,25 +442,22 @@ class ArbiterLogger:
         value: float,
         description: str = ""
     ):
-        """Log a grokking-related signal."""
+        """Log a grokking-related signal (Now Async)."""
         if not self.current_run_id:
             return
         
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO grokking_signals (
-                    run_id, step, signal_type, value, description, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                self.current_run_id,
-                step,
-                signal_type,
-                value,
-                description,
-                datetime.now().isoformat()
-            ))
-            conn.commit()
+        # Offload to queue
+        self._queue.put({
+            'type': 'grokking_signal',
+            'data': {
+                'run_id': self.current_run_id,
+                'step': step,
+                'signal_type': signal_type,
+                'value': value,
+                'description': description,
+                'timestamp': datetime.now().isoformat()
+            }
+        })
         
         # Update experiment table with grokking step
         if signal_type == "validation_drop":
@@ -425,6 +481,12 @@ class ArbiterLogger:
         """Mark experiment as complete and record final metrics."""
         if not self.current_run_id:
             return
+        
+        # Signal worker to finish
+        self._stop_event.set()
+        if hasattr(self, '_worker_thread'):
+            self._queue.put(None) # Sentinel to break loop
+            self._worker_thread.join(timeout=5.0)
         
         with self._get_connection() as conn:
             cursor = conn.cursor()

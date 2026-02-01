@@ -229,6 +229,7 @@ def main():
             if "mode" in train_cfg: args.extend(["--mode", train_cfg["mode"]])
             if "batch_size" in train_cfg: args.extend(["--batch-size", str(train_cfg["batch_size"])])
             if "learning_rate" in train_cfg: args.extend(["--lr", str(train_cfg["learning_rate"])])
+            if "weight_decay" in train_cfg: args.extend(["--weight-decay", str(train_cfg["weight_decay"])])
             if "max_steps" in train_cfg: args.extend(["--steps", str(train_cfg["max_steps"])])
             if "val_interval" in eval_cfg: args.extend(["--val-interval", str(eval_cfg["val_interval"])])
             
