@@ -44,6 +44,7 @@ class TrainingConfig:
     
     # Data
     bible_dir: str = "../../../Bible"
+    max_seq_len: int = 512
     
     # Checkpointing & Logging
     save_interval: int = 2000

@@ -6,7 +6,7 @@
 
 [inference]
 # Device: "auto" (detects CUDA), "cuda", or "cpu"
-device = "auto"
+device = "cuda"
 
 # Generation Control
 max_tokens = 100
@@ -41,6 +41,7 @@ autoresume_best = true
 
 [model]
 # Default architecture (if not using a preset mode)
+vocab_size = "auto"
 dim = 512
 n_layers = 12
 n_heads = 8
@@ -51,7 +52,6 @@ max_seq_len = 512
 [data]
 # Source directories (root-relative)
 bible_dir = "Bible"
-corpus_path = "data/nwt_corpus.txt"
 
 # Generated artifacts
 tokenizer_path = "data/genesis_char_tokenizer.json"
@@ -86,3 +86,21 @@ verbose_logging = true
 
 # Environment
 use_libuv = "0"
+
+[tasks]
+# Multi-task training distribution (sums to 1.0)
+lm = 0.70
+coherence = 0.15
+cross_ref = 0.075
+paraphrase = 0.075
+
+[sweep]
+# Parameter space for hyperparameter exploration
+# Values must be lists
+n_layers = [12, 16, 24]
+dim = [512, 768]
+learning_rate = [1e-4, 3e-4]
+weight_decay = [0.05, 0.1]
+strategy = "grid"  # Options: "grid", "random"
+num_trials = 10
+output_dir = "./sweep_runs"

@@ -4,29 +4,129 @@ import json
 import unicodedata
 
 
+class ByteTokenizer:
+    """
+    Byte-level UTF-8 tokenizer.
+    Uses exactly 256 raw bytes (0-255) + 4 special tokens.
+    """
+    def __init__(self):
+        self.pad_token = "<pad>"
+        self.unk_token = "<unk>"
+        self.bos_token = "<s>"
+        self.eos_token = "</s>"
+        
+        self.pad_id = 0
+        self.unk_id = 1
+        self.bos_id = 2
+        self.eos_id = 3
+        
+        # Bytes are offset by 4
+        self.byte_offset = 4
+        self.vocab_size = 256 + self.byte_offset
+        
+        print(f"[OK] Initialized Byte-Level UTF-8 Tokenizer (vocab size: {self.vocab_size})")
+
+    def encode(self, text, add_special_tokens=False):
+        """Encode text to byte-level token IDs."""
+        byte_data = text.encode('utf-8')
+        token_ids = [b + self.byte_offset for b in byte_data]
+        
+        if add_special_tokens:
+            token_ids = [self.bos_id] + token_ids + [self.eos_id]
+            
+        return token_ids
+
+    def decode(self, ids, skip_special_tokens=True):
+        """Decode token IDs back to text."""
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+            
+        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+        
+        byte_list = []
+        for tid in ids:
+            if skip_special_tokens and tid in special_ids:
+                continue
+            if tid >= self.byte_offset:
+                byte_list.append(tid - self.byte_offset)
+            # UNK or other specials (if not skipped) are handled as 0 byte or ignored
+            elif tid == self.unk_id and not skip_special_tokens:
+                 byte_list.append(0) # Minimal fallback
+                 
+        try:
+            return bytes(byte_list).decode('utf-8', errors='replace')
+        except Exception:
+            return "[Decode Error]"
+
+    def __call__(self, text, truncation=True, max_length=1024, add_special_tokens=False):
+        if isinstance(text, str):
+            tokens = self.encode(text, add_special_tokens=add_special_tokens)
+            if truncation:
+                tokens = tokens[:max_length]
+            return torch.tensor([tokens])
+        else:
+            all_tokens = []
+            for t in text:
+                tokens = self.encode(t, add_special_tokens=add_special_tokens)
+                if truncation:
+                    tokens = tokens[:max_length]
+                all_tokens.append(tokens)
+            
+            max_len = max(len(t) for t in all_tokens)
+            padded = []
+            for tokens in all_tokens:
+                padded.append(tokens + [self.pad_id] * (max_len - len(tokens)))
+            
+            return torch.tensor(padded)
+
+    def get_vocab_size(self):
+        return self.vocab_size
+
+
 class GenesisTokenizer:
     """
-    Unified tokenizer wrapper supporting both BPE and character-level tokenization.
-    Automatically detects tokenizer type from file format.
+    Unified tokenizer wrapper supporting BPE, character-level, and byte-level tokenization.
+    Automatically detects tokenizer type.
     """
     
-    def __init__(self, tokenizer_path):
+    def __init__(self, tokenizer_path=None, type=None):
         self.tokenizer_path = tokenizer_path
-        self.tokenizer_type = None
+        self.tokenizer_type = type
         
-        # Load and detect tokenizer type
-        with open(tokenizer_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        
-        if config.get('type') == 'CharacterLevel' or config.get('model', {}).get('type') == 'CharacterLevel':
-            # Character-level tokenizer
-            self.tokenizer_type = 'character'
-            self._init_char_tokenizer(config)
-        else:
-            # BPE tokenizer (legacy)
-            self.tokenizer_type = 'bpe'
-            self.tokenizer = Tokenizer.from_file(tokenizer_path)
-            self.vocab_size = self.tokenizer.get_vocab_size()
+        if type == 'byte':
+            self.tokenizer = ByteTokenizer()
+            self.tokenizer_type = 'byte'
+            self.vocab_size = self.tokenizer.vocab_size
+            return
+
+        if not tokenizer_path:
+            # Default to byte if no path provided
+            self.tokenizer = ByteTokenizer()
+            self.tokenizer_type = 'byte'
+            self.vocab_size = self.tokenizer.vocab_size
+            return
+            
+        # Load and detect tokenizer type from file
+        try:
+            with open(tokenizer_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            if config.get('type') == 'ByteLevel' or config.get('model', {}).get('type') == 'ByteLevel':
+                self.tokenizer_type = 'byte'
+                self.tokenizer = ByteTokenizer()
+                self.vocab_size = self.tokenizer.vocab_size
+            elif config.get('type') == 'CharacterLevel' or config.get('model', {}).get('type') == 'CharacterLevel':
+                self.tokenizer_type = 'character'
+                self._init_char_tokenizer(config)
+            else:
+                self.tokenizer_type = 'bpe'
+                self.tokenizer = Tokenizer.from_file(tokenizer_path)
+                self.vocab_size = self.tokenizer.get_vocab_size()
+        except Exception as e:
+            print(f"[WARN] Failed to load tokenizer from {tokenizer_path}, defaulting to ByteTokenizer: {e}")
+            self.tokenizer = ByteTokenizer()
+            self.tokenizer_type = 'byte'
+            self.vocab_size = self.tokenizer.vocab_size
     
     def _init_char_tokenizer(self, config):
         """Initialize character-level tokenizer from config."""
@@ -60,7 +160,9 @@ class GenesisTokenizer:
         Returns:
             List of token IDs
         """
-        if self.tokenizer_type == 'bpe':
+        if self.tokenizer_type == 'byte':
+            return self.tokenizer.encode(text, add_special_tokens=add_special_tokens)
+        elif self.tokenizer_type == 'bpe':
             return self.tokenizer.encode(text, add_special_tokens=add_special_tokens).ids
         else:
             # Character-level encoding
@@ -92,14 +194,18 @@ class GenesisTokenizer:
         Returns:
             Decoded text string
         """
-        # Convert tensor to list if needed
-        if isinstance(ids, torch.Tensor):
-            ids = ids.tolist()
-        
-        if self.tokenizer_type == 'bpe':
+        if self.tokenizer_type == 'byte':
+            return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)
+        elif self.tokenizer_type == 'bpe':
+            # Convert tensor to list if needed
+            if isinstance(ids, torch.Tensor):
+                ids = ids.tolist()
             return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)
         else:
             # Character-level decoding
+            # Convert tensor to list if needed
+            if isinstance(ids, torch.Tensor):
+                ids = ids.tolist()
             special_token_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
             
             chars = []
@@ -123,6 +229,9 @@ class GenesisTokenizer:
         Returns:
             Tensor of token IDs
         """
+        if self.tokenizer_type == 'byte':
+            return self.tokenizer(text, truncation=truncation, max_length=max_length, add_special_tokens=add_special_tokens)
+        
         if isinstance(text, str):
             tokens = self.encode(text, add_special_tokens=add_special_tokens)
             if truncation:
@@ -141,7 +250,8 @@ class GenesisTokenizer:
             max_len = max(len(t) for t in all_tokens)
             padded = []
             for tokens in all_tokens:
-                padded.append(tokens + [self.pad_id] * (max_len - len(tokens)))
+                # Use getattr for pad_id as it might not be directly on GenesisTokenizer for BPE
+                padded.append(tokens + [getattr(self, 'pad_id', 0)] * (max_len - len(tokens)))
             
             return torch.tensor(padded)
     
@@ -247,4 +357,3 @@ class GenesisTokenizer:
             mapping_table[old] = new
             
         return mapping_table
-

@@ -45,6 +45,8 @@ def get_data_path(key: str, default: Optional[str] = None, root: Optional[Path] 
     if not path_str:
         raise ValueError(f"Data path key '{key}' not found in config and no default provided.")
         
+    p = Path(path_str)
+    return p if p.is_absolute() else project_root / p
 
 def resolve_vocab_size(config: Dict[str, Any], root: Optional[Path] = None) -> Dict[str, Any]:
     """

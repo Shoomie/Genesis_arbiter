@@ -43,22 +43,19 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     merged_config.update(eval_cfg_dict)
     merged_config.update(data_cfg_dict)
 
-    # Create config object
-    # We call resolve_vocab_size on the merged dict (mimicking structure expected by resolver)
-    # Resolver expects {'model': {...}, 'data': {...}}
-    # But merged_config is flat.
-    # Re-construct a structured dict for resolution
+    # 1b. Load model section for specific resolution
+    model_cfg_dict = get_config_section("model")
+
+    # Create config object for resolution
     structured_config = {
-        "model": {"vocab_size": merged_config.get("vocab_size", "auto") if "vocab_size" in merged_config else "auto"}, # Default to auto if not present?
-        "data": data_cfg_dict, # Use original dicts
+        "model": model_cfg_dict,
+        "data": data_cfg_dict,
         "training": train_cfg_dict
     }
     
-    # Actually, resolve_vocab_size reads 'vocab_size' from model section.
-    # If the TOML 'model' section was merged into merged_config, we might have lost the structure.
-    # We should load 'model' section separately.
-    model_cfg_dict = get_config_section("model")
-    structured_config["model"].update(model_cfg_dict)
+    # Ensure vocab_size is present and set to 'auto' if missing
+    if "vocab_size" not in structured_config["model"]:
+        structured_config["model"]["vocab_size"] = "auto"
     
     # Resolve
     resolved = resolve_vocab_size(structured_config)
@@ -82,9 +79,9 @@ def get_model(mode: str, device: str, vocab_size: Optional[int] = None) -> Multi
     """Initialize the model architecture."""
     # Define architectures
     archs = {
-        "microscope": ModelConfig(dim=144, n_layers=144, n_heads=12, intermediate_size=1536, vocab_size=8000),
-        "deep_narrow_40": ModelConfig(dim=384, n_layers=40, n_heads=12, intermediate_size=1536, vocab_size=16000),
-        "standard": ModelConfig(dim=512, n_layers=12, n_heads=8, intermediate_size=2048, vocab_size=16000)
+        "microscope": ModelConfig(dim=144, n_layers=144, n_heads=12, intermediate_size=1536, vocab_size=0),
+        "deep_narrow_40": ModelConfig(dim=384, n_layers=40, n_heads=12, intermediate_size=1536, vocab_size=0),
+        "standard": ModelConfig(dim=512, n_layers=12, n_heads=8, intermediate_size=2048, vocab_size=0)
     }
     
     if mode not in archs:
@@ -137,40 +134,58 @@ def main():
     # 1. Load Configuration
     train_config, model_config = load_global_config_into_training_config(args)
     print(f"Loaded Configuration:\n{train_config}")
-    print(f"Model Configuration:\n{model_config}")
     
-    # 2. Tokenizer
-    print("Loading Tokenizer...")
+    # 2. Tokenizer & Data Loader (VRAM Resident)
+    print("Initializing Byte-Level GPU Data Pipeline...")
+    
     try:
-        # Use get_data_path to correctly resolve from config or default
-        tokenizer_path = get_data_path("tokenizer_path")
-        if not tokenizer_path.exists():
-            print(f"Warning: Tokenizer not found at {tokenizer_path}")
-    except Exception as e:
-        # Fallback logic if needed, or crash
-        print(f"Error resolving tokenizer path: {e}")
-        # Legacy fallback
-        tokenizer_path = Path(train_config.bible_dir) / "tokenizers" / "genesis_char_tokenizer.json"
+        cache_path = get_data_path("cache_path")
+        if not cache_path.exists():
+            print(f"[ERROR] Data cache not found at {cache_path}. Please run option 3c first.")
+            return
+            
+        print(f"Loading pre-tokenized data from {cache_path}...")
+        cache_data = torch.load(cache_path, map_location='cpu')
         
-    print(f"Using tokenizer: {tokenizer_path}")
-    tokenizer = GenesisTokenizer(str(tokenizer_path))
+        # Auto-detect languages
+        languages = list(cache_data['locale_map'].keys())
+        print(f"[DATA] Detected languages in cache: {', '.join(languages)}")
+        
+        # Initialize Tokenizer (Always Byte-Level for this pipeline)
+        tokenizer = GenesisTokenizer(type='byte')
+        
+        # Override vocab size in model config based on tokenizer
+        model_config.vocab_size = tokenizer.vocab_size
+        print(f"[TOKENIZER] Byte-level vocab size: {model_config.vocab_size}")
+        
+        # Load task distribution
+        task_dist = get_config_section("tasks") or {
+            'lm': 0.70, 'coherence': 0.15, 'cross_ref': 0.075, 'paraphrase': 0.075
+        }
+        
+        # Initialize GPU-Resident Loader
+        from genesis.datasets.byte_loader import InfiniteGPULoader
+        train_loader = InfiniteGPULoader(
+            data_tensor=cache_data['tokens'],
+            verse_indices=cache_data['indices'],
+            locale_map=cache_data['locale_map'],
+            batch_size=train_config.batch_size,
+            max_seq_len=train_config.max_seq_len,
+            task_distribution=task_dist,
+            device=torch.device(train_config.device)
+        )
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize data pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+        return
     
-    # 3. Data Loader
-    print("Initializing Data Loader...")
-    train_loader = get_multi_task_dataloader(
-        bible_data_dir=train_config.bible_dir,
-        tokenizer=tokenizer,
-        batch_size=train_config.batch_size,
-        max_seq_len=1024, # Could be in config
-        device=torch.device(train_config.device)
-    )
-    
-    # 4. Model
+    # 3. Model
     print(f"Initializing Model ({args.mode})...")
-    # Pass dynamically resolved vocab size
     model = get_model(args.mode, train_config.device, vocab_size=model_config.vocab_size)
     
-    # 5. Trainer
+    # 4. Trainer
     trainer = GenesisTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -180,7 +195,6 @@ def main():
     
     # Resume?
     if args.resume:
-        # Find latest
         cp_dir = Path("checkpoints")
         if cp_dir.exists():
             checkpoints = sorted(list(cp_dir.glob("step_*.pt")), key=os.path.getmtime)

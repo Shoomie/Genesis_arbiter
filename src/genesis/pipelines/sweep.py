@@ -377,8 +377,8 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Arbiter Sweep Orchestrator")
-    parser.add_argument("--base-config", type=str, required=True,
-                       help="Path to base TOML configuration")
+    parser.add_argument("--base-config", type=str, default="genesis_config.toml",
+                       help="Path to base TOML configuration (default: genesis_config.toml)")
     parser.add_argument("--output-dir", type=str, default="./sweep_runs",
                        help="Output directory for sweep")
     parser.add_argument("--gpus", type=int, default=1,

@@ -13,6 +13,7 @@ from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
 from typing import Optional, Dict, Any
+from dataclasses import asdict
 
 # Local imports
 from .config import TrainingConfig
@@ -84,12 +85,28 @@ class GenesisTrainer:
             experiment_name=f"genesis_{config.max_steps}_steps"
         )
         
+        # Prepare structured config for ArbiterLogger
+        logger_config = {
+            "training": asdict(self.config),
+            "model": {
+                "n_layers": getattr(self.model.base, 'n_layers', 0),
+                "dim": getattr(self.model.base, 'dim', 0),
+                "n_heads": getattr(self.model.base, 'n_heads', 0),
+                "vocab_size": getattr(self.model, 'vocab_size', 0),
+            },
+            "system": {
+                "precision": config.precision,
+                "device": config.device
+            }
+        }
+        self.logger.start_experiment(logger_config)
+        
         # Callbacks
         self.callbacks = CallbackManager()
         if config.detect_grokking:
-            self.callbacks.register(GrokkingDetector(window_size=100, stringency=0.08))
-            self.callbacks.register(ProcrustesMonitor(log_interval=500))
-            self.callbacks.register(ConceptClusteringMonitor(log_interval=1000))
+            self.callbacks.add_callback(GrokkingDetector(patience=100, threshold=0.08))
+            self.callbacks.add_callback(ProcrustesMonitor(eval_interval=500))
+            self.callbacks.add_callback(ConceptClusteringMonitor(eval_interval=1000))
             
         # State
         self.current_step = 0
@@ -120,14 +137,16 @@ class GenesisTrainer:
                     data_iter = iter(self.train_loader)
                     batch = next(data_iter)
                 
-                # Move to device
-                input_ids = batch['input_ids'].to(self.device, non_blocking=True)
-                targets = batch['labels'].to(self.device, non_blocking=True)
-                task_ids = batch['task_ids'].to(self.device, non_blocking=True)
+                # Move all tensors in batch to device
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        batch[k] = v.to(self.device, non_blocking=True)
                 
                 # Context for precision
                 with autocast(device_type=self.device.type, dtype=self._get_dtype()):
-                    loss, logs = self.model(input_ids, targets, task_ids=task_ids)
+                    # MultiTaskLlama returns (outputs, loss, task_name)
+                    # We only need loss for backward, but we could log task_name
+                    outputs, loss, task_name = self.model(batch)
                     scaled_loss = loss / self.config.grad_accum_steps
                     
                 self.scaler.scale(scaled_loss).backward()
@@ -150,7 +169,12 @@ class GenesisTrainer:
                 dt = time.time() - t0
                 tokens_per_sec = (self.config.effective_batch_size * 512) / dt
                 print(f"Step {self.global_step}: Loss {step_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s")
-                self.logger.log_metrics({"train/loss": step_loss, "train/lr": lr}, step=self.global_step)
+                self.logger.log_training_step(
+                    step=self.global_step,
+                    loss=step_loss,
+                    learning_rate=lr,
+                    tokens_per_sec=tokens_per_sec
+                )
                 t0 = time.time()
                 
             # Validation
@@ -166,7 +190,7 @@ class GenesisTrainer:
                 self.save_checkpoint()
                 
             # Callbacks
-            self.callbacks.on_step_end(self.global_step, {"loss": step_loss, "model": self.model})
+            self.callbacks.on_batch_end(self.global_step, self.model, step_loss)
             
     def validate(self):
         """Run validation loop."""
@@ -179,26 +203,30 @@ class GenesisTrainer:
             for batch in self.val_loader:
                 if steps >= 50: break # Partial validation for speed
                 
-                input_ids = batch['input_ids'].to(self.device)
-                targets = batch['labels'].to(self.device)
-                task_ids = batch['task_ids'].to(self.device)
+                # Move all tensors in batch to device
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        batch[k] = v.to(self.device, non_blocking=True)
                 
                 with autocast(device_type=self.device.type, dtype=self._get_dtype()):
-                    loss, _ = self.model(input_ids, targets, task_ids=task_ids)
+                    outputs, loss, task_name = self.model(batch)
                 
                 total_loss += loss.item()
                 steps += 1
                 
         avg_loss = total_loss / steps
         print(f"Validation Loss: {avg_loss:.4f}\n")
-        self.logger.log_metrics({"val/loss": avg_loss}, step=self.global_step)
+        self.logger.log_evaluation(
+            step=self.global_step,
+            val_perplexity=avg_loss
+        )
         
         self.model.train()
         
     def evaluate_extensive(self):
         """Run extensive procedural evaluation."""
         print(f"\n[Step {self.global_step}] Running Extensive Evaluation...")
-        evaluator = ProceduralEvaluator(self.model, self.tokenizer, self.device)
+        evaluator = ProceduralEvaluator(self.model, self.train_loader.dataset, self.tokenizer, self.device)
         
         # Reconstruction
         recon_score = evaluator.evaluate_reconstruction(
