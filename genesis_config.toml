@@ -9,11 +9,11 @@
 device = "cuda"
 
 # Generation Control
-max_tokens = 100
-temperature = 0.7
+max_tokens = 200
+temperature = 0
 top_k = 40
 top_p = 0.9
-repetition_penalty = 1.5
+repetition_penalty = 1.1
 
 # UX Settings
 stream_output = true
@@ -25,11 +25,11 @@ stop_sequences = ["\n\n\n"]
 mode = "microscope"
 
 # Optimization Parameters
-learning_rate = 2e-4
-weight_decay = 0.15
+learning_rate = 6e-5
+weight_decay = 0.4
 max_steps = 200000
 batch_size = 8
-grad_accum_steps = 1
+grad_accum_steps = 4
 lr_schedule = "cosine"
 warmup_steps = 1000
 min_lr_ratio = 0.05
@@ -47,7 +47,7 @@ n_layers = 10
 n_heads = 4
 intermediate_size = 512
 norm_type = "deepnorm"
-max_seq_len = 16384
+max_seq_len = 8192
 
 [data]
 # Source directories (root-relative)
