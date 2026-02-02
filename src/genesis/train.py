@@ -61,6 +61,7 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     if args.steps: train_config.max_steps = args.steps
     if args.val_interval: train_config.val_interval = args.val_interval
     if args.eval_interval: train_config.eval_interval = args.eval_interval
+    if args.use_cuda_graph: train_config.use_cuda_graph = True
     
     # --- Model Resolution ---
     # Start with standard fallback
@@ -115,6 +116,7 @@ def main():
     parser.add_argument("--mode", type=str, default="standard", help="Model architecture mode")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint")
     parser.add_argument("--compile", action="store_true", help="Compile model")
+    parser.add_argument("--use-cuda-graph", action="store_true", help="Use CUDA Graphs")
     parser.add_argument("--gradient-checkpointing", action="store_true", help="Use gradient checkpointing")
     
     # Hyperparam overrides

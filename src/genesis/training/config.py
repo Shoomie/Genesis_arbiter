@@ -48,6 +48,7 @@ class TrainingConfig:
     # System
     precision: str = "bf16"
     compile_model: bool = False
+    use_cuda_graph: bool = False
     gradient_checkpointing: bool = False
     device: str = "cuda"
     

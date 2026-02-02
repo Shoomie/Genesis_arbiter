@@ -52,13 +52,19 @@ class GenesisTrainer:
         
         # Optimizer
         use_fused = self.device.type == 'cuda'
+        optimizer_kwargs = {
+            "lr": config.learning_rate,
+            "weight_decay": config.weight_decay,
+            "betas": (0.9, 0.95),
+            "eps": 1e-8,
+            "fused": use_fused
+        }
+        if config.use_cuda_graph:
+            optimizer_kwargs["capturable"] = True
+            
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=config.learning_rate,
-            weight_decay=config.weight_decay,
-            betas=(0.9, 0.95),
-            eps=1e-8,
-            fused=use_fused
+            **optimizer_kwargs
         )
         
         # Scheduler
@@ -124,6 +130,12 @@ class GenesisTrainer:
         self.smoothed_s_per_step = None
         self.vram_warned = False
         
+        # CUDA Graph State
+        self.cuda_graph = None
+        self.static_tokens = None
+        self.static_labels = None
+        self.graph_warmup_steps = 10
+        
         # Display model info on init if requested or standard
         self._print_startup_banner()
 
@@ -148,6 +160,23 @@ class GenesisTrainer:
         print(f"  [TRAIN] Device: {self.device} | Steps: {self.config.max_steps}")
         print("="*60 + "\n")
 
+    def _train_step(self, tokens, labels, is_capture=False):
+        """Single training step (Forward + Backward + Optimizer)"""
+        self.optimizer.zero_grad(set_to_none=True)
+        
+        # Note: grad_accum_steps is handled outside for simplicity in CUDA Graphs
+        with autocast(device_type=self.device.type, dtype=self._get_dtype()):
+            outputs, loss, task_name = self.model({"tokens": tokens, "labels": labels})
+            scaled_loss = loss / self.config.grad_accum_steps
+            self.scaler.scale(scaled_loss).backward()
+        
+        self.scaler.unscale_(self.optimizer)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        
+        return scaled_loss.detach()
+
     def train(self):
         """Execute the training loop."""
         print_flash_attention_status()
@@ -164,33 +193,51 @@ class GenesisTrainer:
             step_start = time.time()
             # Training step
             step_loss = torch.tensor(0.0, device=self.device)
-            self.optimizer.zero_grad(set_to_none=True)
             
-            for _ in range(self.config.grad_accum_steps):
-                try:
-                    batch = next(data_iter)
-                except StopIteration:
-                    data_iter = iter(self.train_loader)
-                    batch = next(data_iter)
+            if self.config.use_cuda_graph and self.cuda_graph is not None:
+                # REPLAY MODE
+                try: batch = next(data_iter)
+                except StopIteration: batch = next(iter(self.train_loader))
                 
-                # Context for precision
-                with autocast(device_type=self.device.type, dtype=self._get_dtype()):
-                    # MultiTaskLlama returns (outputs, loss, task_name)
-                    # We only need loss for backward, but we could log task_name
-                    outputs, loss, task_name = self.model(batch)
-                    scaled_loss = loss / self.config.grad_accum_steps
-                    self.scaler.scale(scaled_loss).backward()
-                step_loss += scaled_loss.detach()
-            
-            # Optimization
-            self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            
-            # Scheduler
-            lr = self.scheduler.step(self.global_step)
+                self.static_tokens.copy_(batch['tokens'], non_blocking=True)
+                self.static_labels.copy_(batch['labels'], non_blocking=True)
+                self.cuda_graph.replay()
+                lr = self.scheduler.step(self.global_step)
+            else:
+                # EAGER/CAPTURE MODE
+                if self.config.use_cuda_graph and self.global_step == self.graph_warmup_steps:
+                    # Capture initialization
+                    try: batch = next(data_iter)
+                    except StopIteration: batch = next(iter(self.train_loader))
+                    
+                    if self.static_tokens is None:
+                        self.static_tokens = batch['tokens'].clone().detach()
+                        self.static_labels = batch['labels'].clone().detach()
+                    
+                    print(f"  [SYSTEM] Capturing CUDA Graph at step {self.global_step}...")
+                    
+                    # Warmup for allocator
+                    s = torch.cuda.Stream()
+                    s.wait_stream(torch.cuda.current_stream())
+                    with torch.cuda.stream(s):
+                        for _ in range(3):
+                            self._train_step(self.static_tokens, self.static_labels)
+                    torch.cuda.current_stream().wait_stream(s)
+                    
+                    # Capture
+                    self.cuda_graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(self.cuda_graph):
+                        self._train_step(self.static_tokens, self.static_labels, is_capture=True)
+                    
+                    print("  [SYSTEM] CUDA Graph captured successfully.")
+                else:
+                    # Standard Eager Step
+                    for _ in range(self.config.grad_accum_steps):
+                        try: batch = next(data_iter)
+                        except StopIteration: batch = next(iter(self.train_loader))
+                        step_loss += self._train_step(batch['tokens'], batch['labels'])
+                
+                lr = self.scheduler.step(self.global_step)
             
             # --- Performance Precision ---
             # Isolate the training time for this step

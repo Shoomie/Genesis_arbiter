@@ -29,7 +29,7 @@ learning_rate = 6e-5
 weight_decay = 0.4
 max_steps = 200000
 batch_size = 8
-grad_accum_steps = 4
+grad_accum_steps = 8
 lr_schedule = "cosine"
 warmup_steps = 1000
 min_lr_ratio = 0.05
@@ -43,7 +43,7 @@ autoresume_best = true
 # Default architecture (if not using a preset mode)
 vocab_size = "auto"
 dim = 128
-n_layers = 10
+n_layers = 12
 n_heads = 4
 intermediate_size = 512
 norm_type = "deepnorm"
