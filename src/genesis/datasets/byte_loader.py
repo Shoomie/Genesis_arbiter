@@ -22,16 +22,30 @@ class InfiniteGPULoader:
         boundary_tensor: Optional[torch.Tensor] = None,
         seed: int = 42
     ):
+        self.device = device
         self.data_tensor = data_tensor.to(device, non_blocking=True)
         self.boundary_tensor = boundary_tensor.to(device, non_blocking=True) if boundary_tensor is not None else None
         self.verse_indices = verse_indices
-        self.locale_map = locale_map
+        self.locale_map = locale_map # locale -> List[verse_indices]
+        
+        # Pre-compute locale ID tensor for telemetry
+        # This maps every token index to a language index
+        self.locales = sorted(list(locale_map.keys()))
+        self.locale_to_id = {lang: i for i, lang in enumerate(self.locales)}
+        
+        token_locales = torch.zeros(len(data_tensor), dtype=torch.uint8, device=device)
+        for lang, v_indices in locale_map.items():
+            l_id = self.locale_to_id[lang]
+            for v_idx in v_indices:
+                start, length = verse_indices[v_idx]
+                token_locales[start : start + length] = l_id
+        self.locale_tensor = token_locales
+
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.task_distribution = task_distribution
         self.tasks = list(task_distribution.keys())
         self.task_probs = np.array([task_distribution[t] for t in self.tasks])
-        self.device = device
         self.rng = np.random.RandomState(seed)
         
         # Pre-convert verse_indices to tensor for faster access on GPU
@@ -120,7 +134,19 @@ class InfiniteGPULoader:
             # We skip masking the first token sometimes or just mask everything
             batch_tokens = torch.where(mask, 0, batch_tokens) 
             
-        return {"task": "lm", "tokens": batch_tokens, "labels": batch_labels}
+        # TELEMETRY: Get most common locale for each sequence in batch
+        # shape [B, L] -> [B, L]
+        batch_locales = self.locale_tensor[indices]
+        # Just take the first token's locale as representative for the whole sequence
+        # (Usually accurate enough for Bible verses, which are 50-200 tokens)
+        seq_locales = batch_locales[:, 0].tolist()
+        
+        return {
+            "task": "lm", 
+            "tokens": batch_tokens, 
+            "labels": batch_labels,
+            "locales": seq_locales # List of lang IDs [B]
+        }
 
     def __iter__(self):
         while True:

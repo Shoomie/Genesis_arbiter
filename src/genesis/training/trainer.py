@@ -30,6 +30,7 @@ from .callbacks.grokking import GrokkingDetector, ProcrustesMonitor, ConceptClus
 from ..models.multi_task_wrapper import MultiTaskLlama
 from ..evaluation.procedural_evaluator import ProceduralEvaluator
 from ..utils.logger import ArbiterLogger, enable_windows_ansi
+from ..utils.visualizer import GenesisVisualizer
 
 class GenesisTrainer:
     """
@@ -139,6 +140,16 @@ class GenesisTrainer:
         
         self.lr_stun_executed = False # Track if automated stun happened
         
+        # Multilingual Telemetry
+        loader_obj = getattr(self.train_loader, 'loader', self.train_loader)
+        self.locales = getattr(loader_obj, 'locales', [])
+        self.locale_to_id = getattr(loader_obj, 'locale_to_id', {})
+        self.lang_stats = {lang: {"ema": None, "steps": 0} for lang in self.locales}
+        
+        # Interactive Dashboard
+        self.visualizer = GenesisVisualizer(self.logger, self.logger.current_run_id)
+        self.visualizer.start()
+        
         # Plateau Detection State (Persisted)
         self.last_ema_check = None
         self.ema_at_last_check = None
@@ -197,54 +208,35 @@ class GenesisTrainer:
         self.stats_thread.start()
 
     def _print_startup_banner(self):
-        """Print a comprehensive dashboard header with hardware/model/train info."""
+        """Print a comprehensive high-fidelity dashboard (Wide Layout)."""
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         
-        # Hardware Info
-        fa_config = FlashAttentionConfig()
         gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
         cuda_ver = torch.version.cuda if torch.cuda.is_available() else "N/A"
         
-        # Model Size
         param_bytes = 4 if self.config.precision == "fp32" else 2
         model_size_mb = total_params * param_bytes / (1024**2)
+
+        width = 110
+        print("\033[1m" + "="*width + "\033[0m")
+        print(f"G E N E S I S   A R B I T E R   |   T R A I N I N G   D A S H B O A R D".center(width))
+        print(f"DASHBOARD: http://localhost:{self.visualizer.port}".center(width))
+        print("\033[1m" + "="*width + "\033[0m")
         
-        print("="*65)
-        print(f"  G E N E S I S   A R B I T E R   |   T R A I N I N G   D A S H B O A R D")
-        print("="*65)
+        # Row 1: Hardware vs Topology
+        sys_info = f"[SYSTEM] Hardware: {gpu_name[:25]} | CUDA {cuda_ver}"
+        mod_info = f"[MODEL]  L: {getattr(self.model.base, 'n_layers', 0)} | D: {getattr(self.model.base, 'dim', 0)} | H: {getattr(self.model.base, 'n_heads', 0)}"
+        print(f" {sys_info:<54} | {mod_info}")
         
-        # Research Status Lines
-        m_prob = 0.0
-        r_status = ""
-        loader = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
-        if hasattr(loader, 'mask_prob'):
-            m_prob = loader.mask_prob
-            
-        if self.span_active:
-            ramp_p = min((self.global_step - self.span_activated_step) / max(self.config.span_ramp_steps, 1), 1.0) * 100
-            r_status = f"Phase 3 (SPAN) @ {m_prob*100:.1f}% " + (f"[{ramp_p:.0f}% RAMPED]" if ramp_p < 100 else "[STABLE]")
-        elif self.wwm_active:
-            ramp_p = min((self.global_step - self.wwm_activated_step) / max(self.config.wwm_ramp_steps, 1), 1.0) * 100
-            r_status = f"Phase 2 (WWM) @ {m_prob*100:.1f}% " + (f"[{ramp_p:.0f}% RAMPED]" if ramp_p < 100 else "[STABLE]")
-        else:
-            r_status = "Phase 1 (BYTE) @ 0.0%"
-            
-        lr_status = "[STUNNED]" if self.lr_stun_executed else "[COSINE]"
-        stag_count = f"{self.analytics.stagnation_steps}/{self.config.plateau_lr_patience}"
-            
-        print(f" [RESEARCH] {r_status}")
-        print(f" [RESEARCH] LR: {lr_status} | Stagnation: {stag_count} steps")
-        print(f" [SYSTEM]   Compiled: {'YES' if self.is_compiled else 'NO'}")
+        # Row 2: Precision vs Params
+        prec_info = f"[SYSTEM] Precision: {self.config.precision} | VRAM Weights: {model_size_mb:.1f}MB"
+        param_info = f"[MODEL]  Params: {total_params/1e6:.1f}M ({trainable_params/1e6:.1f}M train) | Vocab: {getattr(self.model, 'vocab_size', 0)}"
+        print(f" {prec_info:<54} | {param_info}")
         
-        # Model Segment
-        print("-" * 65)
-        print(f" [MODEL]  Layers: {getattr(self.model.base, 'n_layers', 0)} | Dim: {getattr(self.model.base, 'dim', 0)} | Heads: {getattr(self.model.base, 'n_heads', 0)}")
-        print(f" [MODEL]  Params: {total_params/1e6:.2f}M ({trainable_params/1e6:.2f}M trainable) | Vocab: {getattr(self.model, 'vocab_size', 0)}")
-        print(f" [MODEL]  Est. VRAM Weights: {model_size_mb:.2f} MB")
+        print("-" * width)
         
-        # Training Segment
-        print("-" * 65)
+        # Row 3: Training Config vs Research Phase
         total_tokens = 0
         if hasattr(self.train_loader, 'loader'):
             total_tokens = len(self.train_loader.loader.data_tensor)
@@ -252,34 +244,59 @@ class GenesisTrainer:
             total_tokens = len(self.train_loader.data_tensor)
         token_str = f"{total_tokens/1e6:.2f}M" if total_tokens >= 1e6 else f"{total_tokens/1e3:.1f}K"
         
-        print(f" [TRAIN]  Steps: {self.config.max_steps} | Batch: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
-        print(f" [TRAIN]  SeqLen: {self.config.max_seq_len} | Tokens: {token_str} | LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
+        train_info = f"[TRAIN]  Steps: {self.config.max_steps} | Batch: {self.config.batch_size} (x{self.config.grad_accum_steps})"
         
-        # Research Segment
-        if self.wwm_active or self.span_active:
-            print("-" * 65)
-            if self.span_active:
-                print(f" [RESEARCH] Phase 2 (WWM): Final Improv: {self.wwm_final_improvement:.2f}%")
-                print(f" [RESEARCH] Phase 3 (Span): Current Improv: {self.span_improvement:.2f}%")
-            else:
-                wwm_imp = 0.0
-                if self.ema_at_wwm and self.loss_ema:
-                    wwm_imp = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
-                print(f" [RESEARCH] Phase 2 (WWM): Current Improv: {wwm_imp:.2f}%")
+        loader = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+        m_prob = getattr(loader, 'mask_prob', 0.0)
         
-        print("="*65 + "\n")
+        if self.span_active:
+            r_phase = f"PH3 (SPAN) @ {m_prob*100:.1f}%"
+            r_imp = f"Improv: {self.span_improvement:.2f}%"
+        elif self.wwm_active:
+            r_phase = f"PH2 (WWM) @ {m_prob*100:.1f}%"
+            wwm_imp = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
+            r_imp = f"Improv: {wwm_imp:.2f}%"
+        else:
+            r_phase = "PH1 (BYTE) @ 0.0%"
+            r_imp = "Improv: 0.00%"
+            
+        res_info = f"[RESEARCH] Phase: {r_phase:<20} | {r_imp}"
+        print(f" {train_info:<54} | {res_info}")
+        
+        # Row 4: Sequence vs Dynamics
+        seq_info = f"[TRAIN]  SeqLen: {self.config.max_seq_len} | Corpus: {token_str} tokens"
+        lr_status = "STUNNED" if self.lr_stun_executed else "COSINE"
+        stag_count = f"{self.analytics.stagnation_steps}/{self.config.plateau_lr_patience}"
+        res_dyn = f"[RESEARCH] LR: {lr_status:<10} | Stagnation: {stag_count}"
+        print(f" {seq_info:<54} | {res_dyn}")
+        
+        # Language Stats
+        if self.lang_stats:
+            print("-" * width)
+            lang_lines = []
+            for lang, stats in self.lang_stats.items():
+                if stats['ema'] is not None:
+                    lang_lines.append(f"{lang}: {stats['ema']:.4f}")
+            
+            for i in range(0, len(lang_lines), 8):
+                print(" [LANGS] " + " | ".join(lang_lines[i:i+8]))
+        
+        print("\033[1m" + "="*width + "\033[0m" + "\n")
 
     def _refresh_console(self, current_info=None):
-        """Clear console and reprint banner + current info (Stable)."""
+        """Clear console and reprint banner + current info (Wide Layout)."""
         os.system('cls' if os.name == 'nt' else 'clear')
         self._print_startup_banner()
+        
+        width = 110
         if current_info:
-            print(current_info)
+            print(f" \033[1m{current_info}\033[0m")
         if self.last_stats_display:
             print(self.last_stats_display)
-        print("\n" + "-"*60)
-        print("  [CRTL+C] to safely abort and save session log.")
-        print("-"*60 + "\n")
+            
+        print("\n" + "-"*width)
+        print(" [CTRL+C] to safely abort and save session log.".center(width))
+        print("-"*width + "\n")
 
     def _stats_worker_loop(self):
         """Background thread for heavy NumPy statistics calculation."""
@@ -356,16 +373,30 @@ class GenesisTrainer:
         try:
             while self.global_step < self.config.max_steps:
                 step_start = time.time()
-               # --- Suggestion 3: Automated LR Stun (Stagnation Break) ---
+                # --- Suggestion 3: Automated LR Stun (Stagnation Break) ---
                 if not self.lr_stun_executed and self.analytics.stagnation_steps >= self.config.plateau_lr_patience:
                     print(f"\n  [DYNAMIC] Automated LR Stun: Stagnation reached {self.config.plateau_lr_patience} steps.")
-                    old_lr = self.optimizer.param_groups[0]['lr']
-                    new_lr = old_lr * self.config.plateau_lr_drop
-                    for param_group in self.optimizer.param_groups:
-                        param_group['lr'] = new_lr
+                    
+                    old_multiplier = self.scheduler.multiplier
+                    new_multiplier = old_multiplier * self.config.plateau_lr_drop
+                    
+                    # Apply stun through scheduler multiplier (fixes persistence bug)
+                    self.scheduler.multiplier = new_multiplier
                     self.lr_stun_executed = True
-                    print(f"  [DYNAMIC] Scaling Learning Rate: {old_lr:.2e} -> {new_lr:.2e}")
-                    self.logger.log_grokking_signal(self.global_step, "lr_stun", self.config.plateau_lr_drop, f"Plateau recovery triggered at step {self.global_step}")
+                    
+                    # Momentum Mitigation: Scale down AdamW momentum (exp_avg) to prevent "gradient drag"
+                    # from the high-LR regime pushing the model too hard in the new lower-LR regime.
+                    self._scale_optimizer_momentum(self.config.plateau_lr_drop)
+                    
+                    print(f"  [DYNAMIC] Scaling LR Multiplier: {old_multiplier:.2f} -> {new_multiplier:.2f}")
+                    print(f"  [DYNAMIC] AdamW Momentum Scaled by {self.config.plateau_lr_drop:.2f} to mitigate velocity drag.")
+                    
+                    self.logger.log_grokking_signal(
+                        self.global_step, 
+                        "lr_stun", 
+                        self.config.plateau_lr_drop, 
+                        f"Plateau recovery triggered at step {self.global_step}"
+                    )
 
                 # --- Suggestion 4: Ramped Masking Progression ---
                 if self.wwm_active or self.span_active:
@@ -445,7 +476,7 @@ class GenesisTrainer:
                     lr = self.scheduler.step(self.global_step)
                 
                 # Update Analytics (CPU)
-                self.analytics.update(curr_loss)
+                # Redundant check removed.
                 
                 # --- Performance Precision ---
                 self.interval_time += time.time() - step_start
@@ -501,7 +532,7 @@ class GenesisTrainer:
                     from datetime import timedelta
                     eta_str = str(timedelta(seconds=int(eta_s)))
                     
-                    log_line = f"Step {self.global_step}/{self.config.max_steps}: Loss {curr_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}"
+                    log_line = f"Step {self.global_step}/{self.config.max_steps} | Loss: {curr_loss:.4f} | EMA: {self.loss_ema:.4f} | LR: {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA: {eta_str}"
                     self._refresh_console(log_line)
                     
                     # --- Plateau Detection (Dynamic WWM Trigger) ---
@@ -608,6 +639,8 @@ class GenesisTrainer:
                         tokens_per_sec=tokens_per_sec,
                         gpu_memory_gb=gpu_mem_gb
                     )
+                    
+                    self.logger.log_language_performance(self.global_step, self.lang_stats)
                     
                     self.interval_tokens = 0
                     self.interval_time = 0.0
@@ -774,6 +807,8 @@ class GenesisTrainer:
                 'wwm_final_improvement': self.wwm_final_improvement,
                 'span_improvement': self.span_improvement,
                 'lr_stun_executed': self.lr_stun_executed,
+                'lr_multiplier': self.scheduler.multiplier,
+                'lang_stats': self.lang_stats,
                 # Analytics Persistence
                 'analytics_state': self.analytics.to_dict(),
                 'wwm_analytics_state': self.wwm_analytics.to_dict(),
@@ -837,6 +872,8 @@ class GenesisTrainer:
             self.wwm_final_improvement = rs.get('wwm_final_improvement', 0.0)
             self.span_improvement = rs.get('span_improvement', 0.0)
             self.lr_stun_executed = rs.get('lr_stun_executed', False)
+            self.scheduler.multiplier = rs.get('lr_multiplier', 1.0)
+            self.lang_stats = rs.get('lang_stats', self.lang_stats)
             
             # Restore Analytics History
             if 'analytics_state' in rs:
@@ -869,3 +906,11 @@ class GenesisTrainer:
         if self.config.precision == "bf16": return torch.bfloat16
         if self.config.precision == "fp16": return torch.float16
         return torch.float32
+
+    def _scale_optimizer_momentum(self, factor: float):
+        """Scale down AdamW first moment (exp_avg) to mitigate momentum drag."""
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                state = self.optimizer.state[p]
+                if 'exp_avg' in state:
+                    state['exp_avg'].mul_(factor)

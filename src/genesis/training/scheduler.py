@@ -26,10 +26,11 @@ class LRScheduler:
         self.max_steps = max_steps
         self.schedule = schedule
         self.min_lr_ratio = min_lr_ratio
+        self.multiplier = 1.0 # Persistent factor for external adjustments (e.g. LR Stun)
         
     def step(self, current_step: int):
         """Update optimizer learning rate for the current step."""
-        lr = self.get_lr(current_step)
+        lr = self.get_lr(current_step) * self.multiplier
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
         return lr

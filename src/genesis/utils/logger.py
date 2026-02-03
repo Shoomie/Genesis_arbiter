@@ -196,15 +196,15 @@ class ArbiterLogger:
                 )
             """)
             
-            # Grokking signals table
+            # Language performance logs table
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS grokking_signals (
+                CREATE TABLE IF NOT EXISTS language_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT,
                     step INTEGER,
-                    signal_type TEXT,
-                    value REAL,
-                    description TEXT,
+                    locale TEXT,
+                    ema_loss REAL,
+                    step_count INTEGER,
                     timestamp TEXT,
                     FOREIGN KEY (run_id) REFERENCES experiments(run_id)
                 )
@@ -275,6 +275,19 @@ class ArbiterLogger:
                         data['run_id'], data['step'], data['signal_type'],
                         data['value'], data['description'], data['timestamp']
                     ))
+                    conn.commit()
+                
+                elif msg_type == 'language_performance':
+                    for lang, stats in data['performance'].items():
+                        if stats['ema'] is not None:
+                            cursor.execute("""
+                                INSERT INTO language_logs (
+                                    run_id, step, locale, ema_loss, step_count, timestamp
+                                ) VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                data['run_id'], data['step'], lang,
+                                stats['ema'], stats['steps'], data['timestamp']
+                            ))
                     conn.commit()
                 
                 self._queue.task_done()
@@ -479,6 +492,53 @@ class ArbiterLogger:
                 'timestamp': datetime.now().isoformat()
             }
         })
+
+    def log_language_performance(self, step: int, performance: Dict[str, Dict[str, Any]]):
+        """Log per-language EMA losses and step counts."""
+        if not self.current_run_id:
+            return
+            
+        self._queue.put({
+            'type': 'language_performance',
+            'data': {
+                'run_id': self.current_run_id,
+                'step': step,
+                'performance': performance,
+                'timestamp': datetime.now().isoformat()
+            }
+        })
+        
+        # Also log to TensorBoard
+        if self.tensorboard_writer:
+            for lang, stats in performance.items():
+                if stats['ema'] is not None:
+                    self.tensorboard_writer.add_scalar(f'Research/EMA_Loss_{lang}', stats['ema'], step)
+
+    def get_run_history(self, run_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all training logs for a specific run (for visualization)."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT step, loss, learning_rate, wwm_improvement, span_improvement 
+                FROM training_logs 
+                WHERE run_id = ? 
+                ORDER BY step ASC
+            """, (run_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_grokking_signals(self, run_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all grokking/phase signals for a specific run."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT step, signal_type, value, description 
+                FROM grokking_signals 
+                WHERE run_id = ? 
+                ORDER BY step ASC
+            """, (run_id,))
+            return [dict(row) for row in cursor.fetchall()]
         
         # Update experiment table with grokking step
         if signal_type == "validation_drop":
