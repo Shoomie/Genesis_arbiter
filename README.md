@@ -8,15 +8,12 @@ An experimental AI research platform investigating whether deep, specialized lan
 **Core Hypothesis:**  
 *Reasoning may emerge from deep compression of a single, internally consistent logical framework rather than shallow compression of diverse, often contradictory information.*
 
-**Key Innovation:**  
-Deep & Narrow architectures (80-144 layers, 50M-2B parameters) trained to "grokking" phase transitions—the moment when models shift from memorization to true generalization.
-
 **Current Capabilities:**
 - ⚡ **High-Efficiency Training**: FlashAttention 2.0 + GPU-resident data loading for maximum throughput.
 - 🧬 **WWM & Span Curriculum**: Staged masking (Single → WWM → Span) with linear difficulty ramping.
 - 📉 **Automated Plateau Recovery**: "LR Stun" mechanism to break training stagnation during grokking phases.
 - 📊 **Research-Grade Telemetry**: Multi-lingual metrics, stagnation tracking, and phase-anchored improvement stats.
-- 🎯 **Modular Architecture**: 16-144 layer deep-narrow configurations with configurable gradient resilience.
+
 **Quick Start:**
 ```powershell
 python run.py
@@ -77,12 +74,11 @@ The project uses a unified configuration system:
 ### Core Reading
 - **[Quick Reference](docs/reference/QUICK_REFERENCE.md)** - Project overview
 - **[Theoretical Foundations](docs/research/theoretical_foundations.md)** - Why train on scripture alone?
-- **[Grokking Detection Methodology](docs/research/grokking_detection_methodology.md)** - Phase transition detection & validation
 
 ### Project Resources
 - **[Contributing](project_doc/CONTRIBUTING.md)** - Guidelines for research and code
 - **[Setup Guide](docs/PHASE1_SETUP.md)** - Installation and verification
-- **[Research Papers](docs/research/)** - Full technical analysis
+- **[Research Papers](docs/research/)** - Collection of various research done during the project
 
 ---
 
@@ -102,8 +98,7 @@ This research utilizes the **New World Translation of the Holy Scriptures** publ
 
 ---
 
-**Last Updated**: 2026-02-03  
-**Current Framework**: Phase 4 Complete (Advanced Grokking & Reliability Upgrades)
+**Last Updated**: 2026-02-03
 
 ---
 
