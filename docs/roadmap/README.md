@@ -10,341 +10,97 @@ This roadmap synthesizes the theoretical foundations of the Genesis project with
 ### Objectives
 Establish baseline infrastructure for Bible-only LLM training with hardware-optimized configurations.
 
-### Completed Milestones
+### 🏆 Completed Milestones
 
 #### 1.1 Core Architecture
-- ✅ Implemented Micro-Llama (124M parameters)
-- ✅ RoPE positional embeddings
-- ✅ SwiGLU activation functions
-- ✅ RMSNorm layer normalization
-- ✅ FlashAttention integration
-
-#### 1.2 Multi-Mode System
-- ✅ **Microscope Mode**: 768-dim, 12 layers (125.5M params)
-- ✅ **Tower of Truth**: 144-dim, 144 layers (~3-5M params)
-- ✅ **High-Res Arbiter**: 1024-dim, 24 layers
+- ✅ Implemented **Micro-Llama** (124M parameters)
+- ✅ **RoPE** positional embeddings
+- ✅ **SwiGLU** activation functions
+- ✅ **RMSNorm** layer normalization
+- ✅ **FlashAttention** integration
 - ✅ Interactive hardware/protocol selection menu
 - ✅ Dynamic configuration injection
 
-#### 1.3 High-Frequency Token Initialization
-- ✅ Jehovah token initialization hook (ID: 5)
-- ✅ Configurable variance multiplier (currently 1.0x)
-- ✅ Parameter counting utilities
-
-#### 1.4 Training Infrastructure
-- ✅ Hardware-specific configs (RTX 4070, Quadro T2000)
-- ✅ NWT corpus integration (1,004,926 tokens)
-- ✅ Gradient checkpointing for low-VRAM scenarios
+#### 1.2 Training Infrastructure
+- ✅ **NWT corpus** integration
 - ✅ FSDP/DDP support with single-node optimization
 
 ---
 
-## Phase 2: Logical Refinement 🔄 **IN PROGRESS**
+## Phase 2: Logical Refinement ✅ **COMPLETE**
 
 ### Objectives
 Implement training techniques that force the model to learn logical dependencies rather than surface statistics.
 
-### Milestones
+### 🏆 Completed Milestones
 
-#### 2.1 Tier 1: Causal & Axiomatic Anchors
-**Status**: 🔴 Not Started
+#### 2.1 Dynamic Contextual Masking
+- ✅ **Vectorized Whole-Word Masking (WWM)** implementation.
+- ✅ **Sequence-level Span Masking** with normalized density.
+- ✅ **Linear difficulty ramping** (Curriculum learning) for phase transitions.
 
-| Strategy | Priority | Implementation Complexity | Expected Impact |
-|----------|----------|---------------------------|----------------|
-| Dynamic Masking on Logical Connectives | **HIGH** | Medium | Forces causal reasoning |
-| Intermediate Layer Supervision | **HIGH** | High | Creates compressed logic representation in mid-layers |
-| Parallel Account Contrast | Medium | Medium | Learns invariant truth across retellings |
-| Intra-Chapter Verse Permutation | Medium | Low | Understanding argument flow |
-| JH-Token Weight Lock | Low | Low | Tests impact of freezing high-frequency tokens on semantic geometry |
-
-**Next Action**: Implement dynamic masking for logical connectives ("Therefore", "Because", "So", "Thus")
-
-**Technical Plan**:
-```python
-# In BibleDataset.__getitem__()
-logical_tokens = [tokenizer.encode(w)[0] for w in 
-                  ["Therefore", "Because", "So", "Thus", "For"]]
-mask_prob = 0.3  # 30% masking of logical connectives
-for idx, token_id in enumerate(tokens):
-    if token_id in logical_tokens and random.random() < mask_prob:
-        labels[idx] = token_id  # Force prediction
-        tokens[idx] = MASK_TOKEN
-```
-
-#### 2.2 Tier 2: Structural & Distributional Alignment
-**Status**: 🟡 Partially Complete
-
-- ✅ Structural boundaries via tokenizer (chapter/verse markers)
-- 🔴 **TODO**: Axiomatic oversampling (weight Romans, Proverbs, Genesis)
-- 🔴 **TODO**: End-of-verse penalty (1.2x loss weighting)
-- 🔴 **TODO**: Attention head regularization
-
-**Implementation Priority**: End-of-verse penalty
-```python
-# In Llama.forward()
-verse_end_positions = (labels == VERSE_END_TOKEN).nonzero()
-loss_weights = torch.ones_like(labels, dtype=torch.float)
-loss_weights[verse_end_positions] = 1.2
-weighted_loss = F.cross_entropy(logits.view(-1, vocab_size), 
-                                labels.view(-1), 
-                                reduction='none') * loss_weights.view(-1)
-```
-
-#### 2.3 Tier 3: Granularity & Dependency Tuning
-**Status**: 🔴 Not Started
-
-- **RoPE Scale Tuning**: Increase base to 50,000 for long-range dependencies
-- **RMSNorm Epsilon**: Reduce to 1e-8 for 144-layer stability
-- **Weight Decay on FF-Intermediate**: Prevent memorization
-- **Learning Rate Layer-Decay**: Stabilize output layers
-
-#### 2.4 Tier 4: Optimization Stability
-**Status**: 🟢 Baseline Implemented
-
-- ✅ AdamW optimizer with beta tuning
-- ✅ Cosine learning rate schedule
-- 🔴 **TODO**: FP32 accumulation for foundational verses
-- 🔴 **TODO**: Temperature annealing
+#### 2.2 Numerical Stability & Scaling
+- ✅ Global configuration injection for all hyperparameters.
+- ✅ High-resolution **EMA tracking** for plateau detection.
+- ✅ Automated learning rate recovery via **"LR Stun"**.
 
 ---
 
-## Phase 3: Evaluation Framework 🔴 **NOT STARTED**
+## Phase 3: Reasoning & Evaluation 🔄 **IN PROGRESS**
 
 ### Objectives
-Develop metrics to measure reasoning capabilities beyond perplexity.
+Develop metrics to measure reasoning capabilities beyond simple token prediction.
 
-### 3.1 Intrinsic Metrics
+#### 3.1 Intrinsic Metrics (Layer-wise)
+- [ ] Track when concepts **"crystallize"** across hidden states.
+- [ ] Identify **intermediate reasoning layers** (latent logic blocks).
 
-#### Perplexity Baselines
-- [ ] Measure held-out perplexity across book genres:
-  - Law (Leviticus, Deuteronomy)
-  - Poetry (Psalms, Song of Solomon)
-  - Prophecy (Isaiah, Revelation)
-  - Narrative (Genesis, Acts)
-  - Wisdom (Proverbs, Ecclesiastes)
-  - Epistles (Romans, Ephesians)
+#### 3.2 Extrinsic Reasoning Tests
+- **A. Verse Completion (Baseline)**
+  - *Input*: "In the beginning God created the heavens and the"
+  - *Expected*: "earth" (Genesis 1:1)
+  - *Metric*: Top-1 accuracy
+- **B. Typological Reasoning (Analogical)**
+  - *Input*: "Isaac's near-sacrifice on Mount Moriah is a type of _____"
+  - *Expected*: "Christ's sacrifice" or similar theological completion
+  - *Metric*: Coherence score (1-5)
+- **C. Ethical Judgment (Arbitration)**
+  - *Metric*: Balanced assessment of justice vs. mercy.
 
-**Hypothesis**: Tower of Truth should excel at epistles (logical arguments) while struggling with poetry.
-
-#### Attention Flow Analysis
-- [ ] Visualize attention patterns for "Jehovah" token
-- [ ] Measure cosine similarity: `emb(Jehovah)` vs. abstract concepts
-  ```python
-  concepts = ["justice", "mercy", "truth", "covenant", "law"]
-  similarities = {c: cosine_sim(jehovah_emb, concept_emb) for c in concepts}
-  ```
-
-#### Layer-wise Representations
-- [ ] Track when concepts "crystallize" across 144 layers
-- [ ] Identify intermediate reasoning layers (hypothesized around layers 70-80 in Tower of Truth)
+#### 🎯 Initial Success Criteria
+- Genesis outperforms broader/larger models on targeted biblical tasks.
+- Genesis produces theologically coherent and logically consistent outputs.
 
 ---
 
-### 3.2 Extrinsic Reasoning Tests
-
-#### Test Suite Design
-
-**A. Verse Completion (Baseline)**
-```
-Input: "In the beginning God created the heavens and the"
-Expected: "earth" (Genesis 1:1)
-Metric: Top-1 accuracy
-```
-
-**B. Typological Reasoning (Analogical)**
-```
-Input: "Isaac's near-sacrifice on Mount Moriah is a type of _____"
-Expected: "Christ's sacrifice" or similar theological completion
-Metric: Human evaluation (coherence score 1-5)
-```
-
-**C. Ethical Judgment (Arbitration)**
-```
-Scenario: "A man steals bread to feed his starving child."
-Prompt: "Evaluate this act based on biblical law and mercy."
-
-Expected Reasoning:
-1. Identify relevant law: "You shall not steal" (Exodus 20:15)
-2. Identify mercy principle: "I desire mercy, not sacrifice" (Hosea 6:6)
-3. Synthesize: Acknowledge tension, invoke Matthew 18:15 (private correction)
-
-Metric: Does output cite relevant scripture? Does it balance justice/mercy?
-```
-
-**D. Parallel Account Verification**
-```
-Input: Present two accounts (e.g., 2 Samuel 24 vs. 1 Chronicles 21)
-Task: Identify the invariant facts vs. stylistic differences
-Metric: Precision/recall on factual extraction
-```
-
----
-
-### 3.3 Comparison Benchmarks
-
-| Baseline | Model | Training Data | Purpose |
-|----------|-------|---------------|---------|
-| GPT-2 (124M) | Standard architecture | WebText | Control for parameter count |
-| DistilGPT-2 | Distilled GPT-2 | WebText | Control for efficiency |
-| GPT-4 (prompted) | SOTA LLM | Internet-scale | Upper bound for reasoning |
-
-**Test Protocol**:
-1. Give each model the same biblical reasoning tasks
-2. Score outputs on:
-   - Scriptural accuracy
-   - Logical coherence
-   - Theological soundness (human expert evaluation)
-
-**Success Criteria**:
-- Genesis outperforms GPT-2 on biblical tasks
-- Genesis produces theologically coherent outputs where GPT-4 (lacking domain knowledge) fails
-
----
-
-## Phase 4: Architectural Experiments 🔴 **NOT STARTED**
+## Reliability & Telemetry 🔄 **IN PROGRESS**
 
 ### Objectives
-Test hypotheses about depth, width, and initialization.
+Ensure research integrity and transparent monitoring of grokking phase transitions.
 
-### 4.1 Ablation Studies
-
-#### Experiment 1: Depth vs. Width
-Train three models with ~5M parameters:
-- **Shallow-Wide**: 1024-dim, 6 layers
-- **Balanced**: 256-dim, 24 layers
-- **Deep-Narrow**: 144-dim, 144 layers (Tower of Truth)
-
-**Hypothesis**: Deep model achieves better logical reasoning (measured by typological tasks).
-
-#### Experiment 2: Jehovah Token Initialization Scaling
-Train Microscope mode with variance multipliers: `[0.5x, 1.0x, 2.0x, 5.0x]`
-
-**Metrics**:
-- Perplexity on verses containing "Jehovah"
-- Cosine similarity between `emb(Jehovah)` and theological concepts
-- Attention weights to "Jehovah" tokens
-
-**Hypothesis**: 2-3x multiplier provides optimal semantic anchoring without distortion.
-
-#### Experiment 3: Positional Encoding Range
-Test RoPE base values: `[10k, 50k, 100k, 500k]`
-
-**Evaluation**: Performance on tasks requiring long-range dependencies (e.g., Paul's multi-chapter arguments in Romans).
+### 🏆 Completed Milestones
+- ✅ **Peak Anchoring**: Decoupled phase activation from baseline capture to ensure accurate metrics after ramping.
+- ✅ **Multi-Lingual Grid**: Real-time per-language perplexity tracking to monitor learning balance.
+- ✅ **Research Dashboard**: Unified telemetry for stagnation countdowns, ramp progress, and LR status.
+- ✅ **State Persistence**: 100% restoration of research dynamics (EMA, Stagnation, Masking) across restarts.
 
 ---
 
-### 4.2 Novel Architectures
+## Future Trajectory & Impact
 
-#### Hierarchical Embeddings
-**Concept**: Separate embedding spaces for:
-- **Level 1**: Words/tokens (current)
-- **Level 2**: Verses (mean-pool tokens)
-- **Level 3**: Chapters (mean-pool verses)
+### Broader Theorized Impact
+- [ ] **Ethical Inner Coherency**: Producing rigid, coherent models assessable for structured inner values.
+- [ ] **Comparative Reasoning**: Building meta-evaluators that leverage larger models for technical scaling.
+- [ ] **AI Alignment**: Demonstrating robust value anchoring through worldview consistency.
 
-**Prediction Head**: Model predicts next verse vector, then decodes to tokens.
+### Long-Term Vision
+1. **Coherence > Scale**: Proving a model trained on coherent tokens can match billion-parameter models in its specific domain.
+2. **Explicit Values Work**: Establishing single-worldview anchoring as a viable alternative to RLHF.
 
-**Hypothesis**: Explicit hierarchical structure mirrors biblical organization.
-
-#### Dual-Stream Architecture
-**Concept**: Split model into parallel streams:
-- **Deep Stream**: Deep, narrow (144 layers, 144-dim) – processes abstract principles
-- **Lexical Stream**: Shallow, wide (12 layers, 768-dim) – handles surface form
-
-**Fusion**: Cross-attention at final layers merges abstract reasoning with linguistic expression.
-
-**Hypothesis**: Separation of concerns improves both interpretability and performance.
-
----
-
-## Phase 5: Deployment & Application 🔴 **NOT STARTED**
-
-### 5.1 Interactive Tools
-
-#### Theological Query Engine
-```
-User: "What does the Bible say about forgiveness?"
-Genesis: 
-1. Retrieves relevant verses (Matthew 18:21-22, Ephesians 4:32)
-2. Identifies core principle (unlimited forgiveness)
-3. Provides typological context (God's forgiveness of Israel)
-```
-
-#### Verse Completion API
-```python
-from genesis import GenesisModel
-
-model = GenesisModel.from_pretrained("microscope-v1")
-completion = model.complete("For God so loved the world that he gave")
-# Output: "his only-begotten Son, so that everyone exercising faith..."
-```
-
-#### Ethical Arbiter
-```
-Input: Modern ethical dilemma
-Output: 
-  - Relevant biblical principles
-  - Competing interpretations (justice vs. mercy)
-  - Coherence score for each interpretation
-```
-
----
-
-### 5.2 Research Artifacts
-
-#### Publishable Outputs
-- [ ] **Paper**: "Reasoning from Coherence: Training LLMs on Single-Worldview Corpora"
-- [ ] **Code Release**: Open-source Genesis architecture + training scripts
-- [ ] **Model Weights**: Release Microscope, Tower of Truth, Arbiter checkpoints
-- [ ] **Dataset**: Annotated evaluation set with typological reasoning tasks
-
-#### Broader Impact
-- [ ] **Multi-Worldview AI**: Extend approach to Qur'an, Analects, Principia Mathematica
-- [ ] **Comparative Reasoning**: Build meta-system that consults multiple worldview-specific models
-- [ ] **AI Alignment**: Demonstrate explicit value anchoring (vs. implicit RLHF)
-
----
-
-## Current Status Summary
-
-| Phase | Status | Next Milestone |
-|-------|--------|----------------|
-| **Phase 1: Foundation** | ✅ Complete | - |
-| **Phase 2: Logical Refinement** | 🔄 In Progress | Implement dynamic masking |
-| **Phase 3: Evaluation** | 🔴 Not Started | Design test suite |
-| **Phase 4: Experiments** | 🔴 Not Started | Plan ablation studies |
-| **Phase 5: Deployment** | 🔴 Not Started | Define API requirements |
-
----
-
-## Immediate Next Steps (Priority Queue)
-
-1. **[HIGH]** Implement dynamic masking on logical connectives
-2. **[HIGH]** Add end-of-verse penalty (1.2x loss weighting)
-3. **[MEDIUM]** Design and implement typological reasoning evaluation
-4. **[MEDIUM]** Train Tower of Truth to convergence, compare with Microscope
-5. **[MEDIUM]** Implement axiomatic oversampling (boost Romans, Proverbs)
-6. **[LOW]** Ablation study: Jehovah token initialization scaling (0.5x to 5.0x)
-7. **[LOW]** Visualize attention patterns for "Jehovah" token
-
----
-
-## Long-Term Vision
-
-The Genesis project aspires to demonstrate that:
-
-1. **Coherence > Scale**: A model trained on 1M coherent tokens can reason within its domain as effectively as billion-parameter models prompted with context
-2. **Depth Enables Abstraction**: 144-layer architectures discover logical primitives that shallow networks miss
-3. **Explicit Values Work**: Anchoring AI to a single coherent worldview is a viable alternative to value-agnostic pre-training + RLHF
-
-**Ultimate Goal**: Build a **minimal viable reasoning engine** that proves specialized intelligence is achievable without internet-scale data.
-
-If successful, Genesis becomes a template for **worldview-specific AI systems** that can be composed into multi-perspective deliberation frameworks.
+> [!IMPORTANT]
+> **Ultimate Goal**: Create a **minimal viable reasoning engine** that proves specialized intelligence is achievable without internet-scale data.
 
 ---
 
 ## References
-
 - [Theoretical Foundations](theoretical_foundations.md) – Philosophical and technical motivation
-- [Walkthrough 1](walkthrough1.md) – Multi-mode implementation verification
-- [Logical Refinement Strategies](../logical_refinement_strategies.md) – Prioritized training techniques
-- [Main README](../README.md) – Quick-start guide

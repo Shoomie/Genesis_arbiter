@@ -22,9 +22,9 @@ src/genesis/
 ├── datasets/               # Data ingestion
 │   └── multi_task.py       # Weighted sampling & data loading
 ├── training/               # Training Loop & Logic
-│   ├── trainer.py          # Modular GenesisTrainer class
-│   ├── scheduler.py        # Learning rate scheduling
-│   └── callbacks/          # Grokking detection & monitoring
+│   ├── trainer.py          # Modular GenesisTrainer class (Research-Focused)
+│   ├── analytics.py        # CPU-offloaded loss dynamics (EMA, Stagnation, Slopes)
+│   └── scheduler.py        # Learning rate scheduling with Stun Support
 ├── pipelines/              # Orchestration Workflows
 │   ├── long_pipeline.py    # Auto-resume long-term training
 │   ├── quick_eval.py       # < 1 hour checkpoint assessments
@@ -40,10 +40,17 @@ src/genesis/
 
 ## 🔑 Key Components
 
-### 1. Training Engine (`train.py` & `training/`)
-The standard entry point for all training jobs is `train.py`. It uses the `GlobalConfig` pattern to load settings from `genesis_config.toml`.
--   **Usage**: Executed via the root `run.py` (Option 1).
--   **Modular Design**: The loop logic is decoupled into `GenesisTrainer`, allowing for easy extension.
+### 1. Training Engine (`training/trainer.py`)
+The `GenesisTrainer` is the project's primary research instrument, featuring:
+- **Curriculum Masking**: Ramping difficulty linearly via `wwm_ramp_steps`.
+- **Plateau Recovery**: Automated "LR Stun" when stagnation limits are hit.
+- **Phase Persistence**: Checkpoints save all research states, including EMA baselines and stagnation counts.
+- **Diagnostics**: Multi-lingual perplexity and phase-anchored improvement tracking.
+
+### 2. GPU-Resident Loader (`datasets/byte_loader.py`)
+A custom, high-throughput `InfiniteGPULoader` that keeps the entire tokenized corpus in VRAM for zero-bottleneck training. It supports:
+- **WWM & Span Masking**: Hardware-accelerated word and sequence masking.
+- **Locale Targeting**: High-precision sampling for specific language evaluation.
 
 ### 2. Pipelines (`pipelines/`)
 Automated workflows that combine training and evaluation.

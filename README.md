@@ -12,11 +12,11 @@ An experimental AI research platform investigating whether deep, specialized lan
 Deep & Narrow architectures (80-144 layers, 50M-2B parameters) trained to "grokking" phase transitions—the moment when models shift from memorization to true generalization.
 
 **Current Capabilities:**
-- ⚡ **3-4x faster training** via FlashAttention integration
--  **Multi-task learning** across 100+ Bible translations (coherence, cross-reference, paraphrase detection)
-- 🎯 **Automated grokking detection** with cross-lingual alignment monitoring
-- 🔬 **Theological concept clustering** to measure emergent semantic structure
-
+- ⚡ **High-Efficiency Training**: FlashAttention 2.0 + GPU-resident data loading for maximum throughput.
+- 🧬 **WWM & Span Curriculum**: Staged masking (Single → WWM → Span) with linear difficulty ramping.
+- 📉 **Automated Plateau Recovery**: "LR Stun" mechanism to break training stagnation during grokking phases.
+- 📊 **Research-Grade Telemetry**: Multi-lingual metrics, stagnation tracking, and phase-anchored improvement stats.
+- 🎯 **Modular Architecture**: 16-144 layer deep-narrow configurations with configurable gradient resilience.
 **Quick Start:**
 ```powershell
 python run.py
@@ -102,8 +102,8 @@ This research utilizes the **New World Translation of the Holy Scriptures** publ
 
 ---
 
-**Last Updated**: 2026-01-31  
-**Current Framework**: Phase 4 Complete (Codebase Professionalization & Centralized Configuration)
+**Last Updated**: 2026-02-03  
+**Current Framework**: Phase 4 Complete (Advanced Grokking & Reliability Upgrades)
 
 ---
 
