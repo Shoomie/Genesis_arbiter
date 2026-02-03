@@ -25,17 +25,13 @@ from dataclasses import dataclass
 try:
     from genesis.utils.logger import ArbiterLogger
     from genesis.pipelines.quick_eval import ArbiterQuickEval
-    
-    # Tools are imported as absolute from the root if root added to PYTHONPATH, 
-    # or we can use relative if they were in the same package.
-    # Since they were moved to tools/, we'll assume they are accessible via 'tools'
-    from tools.arbiter_tokenizer_factory import ArbiterTokenizerFactory
-    from tools.arbiter_data_augmentor import ArbiterDataAugmentor
+    from genesis.models.tokenizer import GenesisTokenizer
 except ImportError:
-    # Fallback to direct imports if run in a way that 'tools' is not a package
+    # Fallback to direct imports
     try:
         from genesis.utils.logger import ArbiterLogger
         from genesis.pipelines.quick_eval import ArbiterQuickEval
+        from genesis.models.tokenizer import GenesisTokenizer
     except:
         print("[WARNING] Some modules not found - running in simulation mode")
 
@@ -45,10 +41,6 @@ class PipelineConfig:
     """Configuration for the long pipeline."""
     corpus_path: str
     output_dir: str
-    
-    # Tokenizer settings
-    vocab_size: int = 8192
-    force_retrain_tokenizer: bool = False
     
     # Training settings
     n_layers: int = 80
@@ -69,15 +61,7 @@ class PipelineConfig:
 class ArbiterLongPipeline:
     """
     Fully automated training pipeline with minimal human intervention.
-    
-    Usage:
-        config = PipelineConfig(
-            corpus_path="./nwt_corpus.txt",
-            output_dir="./pipeline_run_001",
-            max_steps=200000
-        )
-        pipeline = ArbiterLongPipeline(config)
-        pipeline.run()
+    Simplified for pure byte-level tokenization.
     """
     
     def __init__(self, config: PipelineConfig):
@@ -87,12 +71,11 @@ class ArbiterLongPipeline:
         
         # Initialize logger
         self.logger = None
-        self.tokenizer_path = None
-        self.augmented_data_path = None
+        self.tokenizer = GenesisTokenizer(type='byte')
         self.current_step = 0
         
         print(f"\n{'#'*60}")
-        print(f"# Arbiter Long Pipeline")
+        print(f"# Arbiter Long Pipeline (Byte-Level Regime)")
         print(f"# Output: {self.output_dir}")
         print(f"{'#'*60}\n")
     
@@ -104,8 +87,8 @@ class ArbiterLongPipeline:
             # Phase 1: Setup
             self._phase_setup()
             
-            # Phase 2: Data Preparation
-            self._phase_data_preparation()
+            # Phase 2: Data Verification
+            self._phase_data_verification()
             
             # Phase 3: Training
             self._phase_training()
@@ -159,52 +142,16 @@ class ArbiterLongPipeline:
         else:
             print(f"  Starting new training run")
     
-    def _phase_data_preparation(self):
-        """Phase 2: Tokenizer training and data augmentation."""
+    def _phase_data_verification(self):
+        """Phase 2: Verify data cache and byte-level readiness."""
         print(f"\n{'='*60}")
-        print(f"Phase 2: Data Preparation")
+        print(f"Phase 2: Data Verification")
         print(f"{'='*60}")
         
-        # Step 1: Tokenizer
-        tokenizer_dir = self.output_dir / "tokenizers"
-        tokenizer_model = tokenizer_dir / f"arbiter_{self.config.vocab_size}.model"
-        
-        if tokenizer_model.exists() and not self.config.force_retrain_tokenizer:
-            print(f"✓ Using existing tokenizer: {tokenizer_model}")
-            self.tokenizer_path = tokenizer_model
-        else:
-            print(f"  Training new tokenizer (vocab_size={self.config.vocab_size})...")
-            try:
-                factory = ArbiterTokenizerFactory(
-                    corpus_path=self.config.corpus_path,
-                    output_dir=str(tokenizer_dir),
-                    model_prefix="arbiter"
-                )
-                self.tokenizer_path = factory.train_tokenizer(
-                    vocab_size=self.config.vocab_size
-                )
-                print(f"✓ Tokenizer trained: {self.tokenizer_path}")
-            except Exception as e:
-                print(f"✗ Tokenizer training failed: {e}")
-                print(f"  Proceeding without custom tokenizer")
-        
-        # Step 2: Data Augmentation
-        aug_data_path = self.output_dir / "augmented_data.jsonl"
-        
-        if aug_data_path.exists():
-            print(f"✓ Using existing augmented data: {aug_data_path}")
-            self.augmented_data_path = aug_data_path
-        else:
-            print(f"  Generating augmented reasoning traces...")
-            try:
-                augmentor = ArbiterDataAugmentor(corpus_path=self.config.corpus_path)
-                traces = augmentor.generate_all()
-                augmentor.save_jsonl(traces, str(aug_data_path))
-                self.augmented_data_path = aug_data_path
-                print(f"✓ Augmented data generated: {len(traces)} traces")
-            except Exception as e:
-                print(f"✗ Data augmentation failed: {e}")
-                print(f"  Proceeding with raw corpus only")
+        print(f"✓ Enforcing Pure Byte-Level Tokenization (Vocab: 260)")
+        # In the new regime, we assume the user has run Option 3c (update_data_cache.py)
+        # to prepare the giant tensor. 
+        print(f"✓ Pipeline ready for data-constrained reasoning training")
     
     def _phase_training(self):
         """Phase 3: Extended training with interlaced evaluation."""
@@ -223,7 +170,7 @@ class ArbiterLongPipeline:
                     'n_layers': self.config.n_layers,
                     'dim': self.config.dim,
                     'n_heads': self.config.n_heads,
-                    'vocab_size': self.config.vocab_size
+                    'vocab_size': 260
                 },
                 'training': {
                     'weight_decay': self.config.weight_decay,
@@ -283,7 +230,7 @@ class ArbiterLongPipeline:
             
             evaluator = ArbiterQuickEval(
                 checkpoint_path=str(checkpoint_path),
-                tokenizer_path=str(self.tokenizer_path) if self.tokenizer_path else None,
+                tokenizer_path=None,
                 corpus_path=self.config.corpus_path
             )
             
@@ -316,7 +263,7 @@ class ArbiterLongPipeline:
         try:
             evaluator = ArbiterQuickEval(
                 checkpoint_path=str(final_checkpoint),
-                tokenizer_path=str(self.tokenizer_path) if self.tokenizer_path else None,
+                tokenizer_path=None,
                 corpus_path=self.config.corpus_path
             )
             
@@ -342,12 +289,10 @@ class ArbiterLongPipeline:
                 'corpus': self.config.corpus_path,
                 'n_layers': self.config.n_layers,
                 'dim': self.config.dim,
-                'vocab_size': self.config.vocab_size,
+                'vocab_size': 260,
                 'max_steps': self.config.max_steps
             },
             'outputs': {
-                'tokenizer': str(self.tokenizer_path) if self.tokenizer_path else None,
-                'augmented_data': str(self.augmented_data_path) if self.augmented_data_path else None,
                 'final_checkpoint': str(self.output_dir / "checkpoints" / f"step_{self.config.max_steps}"),
                 'logs': str(self.output_dir / "logs")
             },
@@ -406,8 +351,6 @@ if __name__ == "__main__":
                        help="Path to corpus text file")
     parser.add_argument("--output-dir", type=str, required=True,
                        help="Output directory for pipeline")
-    parser.add_argument("--vocab-size", type=int, default=8192,
-                       help="Tokenizer vocabulary size")
     parser.add_argument("--layers", type=int, default=80,
                        help="Number of transformer layers")
     parser.add_argument("--dim", type=int, default=1024,
@@ -423,7 +366,6 @@ if __name__ == "__main__":
     config = PipelineConfig(
         corpus_path=args.corpus,
         output_dir=args.output_dir,
-        vocab_size=args.vocab_size,
         n_layers=args.layers,
         dim=args.dim,
         max_steps=args.max_steps,

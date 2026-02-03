@@ -27,8 +27,7 @@ src/genesis/
 │   └── scheduler.py        # Learning rate scheduling with Stun Support
 ├── pipelines/              # Orchestration Workflows
 │   ├── long_pipeline.py    # Auto-resume long-term training
-│   ├── quick_eval.py       # < 1 hour checkpoint assessments
-│   └── sweep.py            # Hyperparameter sweep orchestrator
+│   └── quick_eval.py       # < 1 hour checkpoint assessments
 ├── evaluation/             # Evaluation Suites
 │   └── procedural.py       # Sub-morphemic alignment tests
 ├── utils/                  # Shared Utilities
@@ -55,7 +54,6 @@ A custom, high-throughput `InfiniteGPULoader` that keeps the entire tokenized co
 ### 2. Pipelines (`pipelines/`)
 Automated workflows that combine training and evaluation.
 -   **Long Pipeline**: Runs for days/weeks, handling crashes and auto-resuming.
--   **Sweep**: Distributed hyperparameter search.
 -   **Quick Eval**: Rapid "Go/No-Go" assessment of checkpoints.
 
 ### 3. Models (`models/`)

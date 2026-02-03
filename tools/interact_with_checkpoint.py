@@ -92,35 +92,19 @@ def load_model(checkpoint_path, device):
                 "max_seq_len": 512
             }
 
-        # 2. Load Tokenizer
-        # Check vocab size from state dict to decide tokenizer type
+        # 2. Initialize Tokenizer (Always Byte-Level in the new regime)
         sd = checkpoint.get('model_state_dict', checkpoint.get('model', {}))
         if not sd:
             print("[ERROR] No model state dict found in checkpoint!")
             return None, None
-
-        if 'base.tok_embeddings.weight' in sd:
-            checkpoint_vocab_size = sd['base.tok_embeddings.weight'].shape[0]
-        elif 'tok_embeddings.weight' in sd:
-            checkpoint_vocab_size = sd['tok_embeddings.weight'].shape[0]
-        else:
-            checkpoint_vocab_size = config.get('vocab_size', 260)
-
-        if checkpoint_vocab_size == 260:
-            print("  Detected Byte-Level UTF-8 Model. Initializing ByteTokenizer...")
-            tokenizer = GenesisTokenizer(type='byte')
-        else:
-            # Fallback to character/BPE
-            tokenizer_path = project_root / "data" / "genesis_char_tokenizer.json"
-            if not tokenizer_path.exists():
-                tokenizer_path = project_root / "genesis_tokenizer.json"
-                
-            if tokenizer_path.exists():
-                print(f"  Loading character/BPE tokenizer from {tokenizer_path.name}...")
-                tokenizer = GenesisTokenizer(str(tokenizer_path))
-            else:
-                print("[WARN] No tokenizer file found. Defaulting to ByteTokenizer (might mismatch vocab).")
-                tokenizer = GenesisTokenizer(type='byte')
+        
+        tokenizer = GenesisTokenizer(type='byte')
+        checkpoint_vocab_size = sd.get('base.tok_embeddings.weight', 
+                                       sd.get('tok_embeddings.weight', 
+                                              torch.tensor([0]*260))).shape[0]
+        
+        if checkpoint_vocab_size != 260:
+            print(f"[WARN] Checkpoint vocab size ({checkpoint_vocab_size}) does not match current Byte-Level regime (260).")
 
         print(f"  Model Config: Dim={config.get('dim')}, Layers={config.get('n_layers')}, Vocab={checkpoint_vocab_size}")
         

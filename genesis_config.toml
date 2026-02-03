@@ -74,7 +74,6 @@ max_seq_len = 8192
 bible_dir = "../Bible"
 
 # Generated artifacts
-tokenizer_path = "data/genesis_char_tokenizer.json"
 cache_path = "data/genesis_data_cache.pt"
 
 # Sampling settings
@@ -115,13 +114,3 @@ use_libuv = "0"
 # Training distribution (sums to 1.0)
 lm = 1.0
 
-[sweep]
-# Parameter space for hyperparameter exploration
-# Values must be lists
-n_layers = [12, 16, 24]
-dim = [512, 768]
-learning_rate = [1e-4, 3e-4]
-weight_decay = [0.05, 0.1]
-strategy = "grid"  # Options: "grid", "random"
-num_trials = 10
-output_dir = "./sweep_runs"

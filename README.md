@@ -11,7 +11,7 @@ An experimental AI research platform investigating whether deep, specialized lan
 **Current Capabilities:**
 - ⚡ **High-Efficiency Training**: FlashAttention 2.0 + GPU-resident data loading for maximum throughput.
 - 🧬 **WWM & Span Curriculum**: Staged masking (Single → WWM → Span) with linear difficulty ramping.
-- 📉 **Automated Plateau Recovery**: "LR Stun" mechanism to break training stagnation during grokking phases.
+- 📉 **Automated Plateau Recovery**: "LR Stun" mechanism to break training stagnation during phases.
 - 📊 **Research-Grade Telemetry**: Multi-lingual metrics, stagnation tracking, and phase-anchored improvement stats.
 
 **Quick Start:**
@@ -32,7 +32,7 @@ python run.py
 
 ---
 
-**Documentation**: See [`docs/PHASE1_SETUP.md`](docs/PHASE1_SETUP.md) for installation and [`src/genesis/README.md`](src/genesis/README.md) for usage details.
+**Documentation**: See [`src/genesis/README.md`](src/genesis/README.md) for usage details.
 
 ---
 

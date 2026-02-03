@@ -67,13 +67,9 @@ def print_menu():
     print("    - [1b] Full evaluation training\n")
     
     print(f"{Colors.GREEN}[2]{Colors.ENDC} {Colors.BOLD}Evaluation & Testing{Colors.ENDC}")
-    print("    - [2a] Interactive Checkpoint Chat")
-    print("    - [2b] Run friction stress test")
-    print("    - [2c] Calculate perplexity\n")
+    print("    - [2a] Interactive Checkpoint Chat\n")
     
-    print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
-    print("    - [3a] Count unique words")
-    print("    - [3b] Count logical connectives")
+    print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Corpus Preparation{Colors.ENDC}")
     print("    - [3c] Pre-process Data (Create Training Data Cache File)")
     print("    - [3d] Generate WWM Boundary Map (Level-Up Training)\n")
     
@@ -87,9 +83,7 @@ def print_menu():
     print(f"{Colors.YELLOW}[5]{Colors.ENDC} {Colors.BOLD}Arbiter Automation (under construction){Colors.ENDC}")
     print("    - [5a] Verify FlashAttention Setup")
     print("    - [5b] Quick Evaluation")
-    print("    - [5c] Long Training Pipeline")
-    print("    - [5d] Parameter Sweep")
-    print("    - [5e] Data Augmentation\n")
+    print("    - [5c] Long Training Pipeline\n")
     
     print(f"{Colors.YELLOW}[6]{Colors.ENDC} {Colors.BOLD}Project Information{Colors.ENDC}")
     print("    View project statistics and status\n")
@@ -259,18 +253,6 @@ def main():
             
             run_script('tools/interact_with_checkpoint.py', 'Interactive Checkpoint Chat', args=args)
             
-        elif choice == '2b':
-            run_script('tools/friction_stress_test.py', 'Running Axiomatic Friction Stress Test')
-            
-        elif choice == '2c':
-            run_script('tools/arbiter_perplexity.py', 'Calculating Perplexity on Contrastive Datasets')
-            
-        elif choice == '3a':
-            run_script('tools/count_unique_words.py', 'Analyzing Corpus Vocabulary')
-            
-        elif choice == '3b':
-            run_script('tools/count_logical_connectives.py', 'Analyzing Logical Connectives in Dataset')
-            
         elif choice == '3c':
             run_script('tools/update_data_cache.py', 'Updating VRAM Data Cache')
         
@@ -301,11 +283,6 @@ def main():
         elif choice == '5c':
             run_script('src/genesis/pipelines/long_pipeline.py', 'Launching Long Training Pipeline')
         
-        elif choice == '5d':
-            run_script('src/genesis/pipelines/sweep.py', 'Starting Parameter Sweep')
-        
-        elif choice == '5e':
-            run_script('tools/arbiter_data_augmentor.py', 'Generating Augmented Data')
         
         elif choice == '6':
             show_project_info()

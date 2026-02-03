@@ -207,54 +207,6 @@ class MultiTaskDataset(Dataset):
             else:
                  raise e
 
-        # -----------------------------------------------------------------
-        # COMPRESS VOCABULARY (Subset Optimization) - GLOBAL
-        # -----------------------------------------------------------------
-        # Run if target_languages are specified OR if we just want to optimize the loaded raw data
-        # Logic: If we filtered (via cache or raw), we want to compress.
-        
-        if self.target_languages:
-            print("  Optimizing vocabulary for selected languages...")
-            
-            # We need to find all unique token IDs used in the VALID parts of data_tensor
-            # data_tensor is one giant array. We only care about ranges in self.verse_indices.
-            
-            # 1. Create a boolean mask of valid regions
-            # Need to handle device carefully
-            valid_mask = torch.zeros(len(self.data_tensor), dtype=torch.bool, device=self.storage_device)
-            
-            # This loop might be slow if 100k verses. Vectorize?
-            # Construct a tensor of [start, len]
-            # We can use repeat_interleave or just loop if vectorized ops not avail.
-            # Given 100k items, Python loop is ~100ms. Acceptable.
-            
-            print(f"    Scanning unique tokens in {len(self.verse_indices)} verses...")
-            
-            # Option: Iterate verses and collect uniques.
-            # Or just fill mask.
-            for start, length in self.verse_indices:
-                valid_mask[start : start + length] = True
-                
-            # 2. Get unique tokens
-            # If on GPU, this is fast.
-            active_tokens = torch.unique(self.data_tensor[valid_mask])
-            print(f"    Found {len(active_tokens)} unique characters (original vocab: {self.tokenizer.vocab_size})")
-            
-            # 3. Compress Tokenizer
-            remap_table = self.tokenizer.compress_vocab(active_tokens)
-            
-            if remap_table is not None:
-                # 4. Remap Data Tensor
-                # Move table to same device
-                remap_table = remap_table.to(self.storage_device)
-                
-                # Apply mapping: new = table[old]
-                # We apply it to the WHOLE tensor (even invalid parts) because it's faster vectorized
-                # Invalid parts map to UNK or whatever, doesn't matter as they are never sampled.
-                print("    Remapping dataset to new vocabulary...")
-                self.data_tensor = remap_table[self.data_tensor]
-                
-                print(f"  [OK] Vocabulary compressed to {self.tokenizer.vocab_size} tokens")
 
 
 
