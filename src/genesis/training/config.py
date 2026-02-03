@@ -62,6 +62,18 @@ class TrainingConfig:
     val_interval: int = 500
     eval_interval: int = 1000
     
+    # Dynamic WWM Trigger
+    wwm_trigger_steps: int = 5000
+    wwm_window: int = 2000
+    wwm_threshold: float = 0.005
+    
+    # Span Masking
+    span_trigger_steps: int = 5000
+    span_window: int = 2000
+    span_threshold: float = 0.005
+    span_min_len: int = 3
+    span_max_len: int = 5
+    
     # Evaluation
     enable_validation: bool = True
     enable_extensive_eval: bool = True

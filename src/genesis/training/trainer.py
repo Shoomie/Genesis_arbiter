@@ -6,9 +6,14 @@ Modular training engine for Genesis Arbiter.
 
 import os
 import time
+import json
+import numpy as np
 import torch
+import sys
+import threading
+import queue
 import torch.nn as nn
-from datetime import timedelta
+from datetime import timedelta, datetime
 from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
@@ -18,7 +23,8 @@ from dataclasses import asdict
 # Local imports
 from .config import TrainingConfig, ModelConfig
 from .scheduler import LRScheduler
-from .flash_attention_config import print_flash_attention_status
+from .flash_attention_config import print_flash_attention_status, FlashAttentionConfig
+from .analytics import LossAnalytics
 from .callbacks.manager import CallbackManager
 from .callbacks.grokking import GrokkingDetector, ProcrustesMonitor, ConceptClusteringMonitor
 from ..models.multi_task_wrapper import MultiTaskLlama
@@ -123,7 +129,42 @@ class GenesisTrainer:
         self.current_step = 0
         self.global_step = 0
         self.best_val_loss = float('inf')
+        self.loss_ema = None
+        self.wwm_active = False
+        self.wwm_activated_step = None
+        self.span_active = False
+        self.span_activated_step = None
         
+        # Research Performance Tracking
+        self.ema_at_wwm = None
+        self.ema_at_span = None
+        self.wwm_final_improvement = 0.0
+        self.span_improvement = 0.0
+        
+        self.analytics = LossAnalytics(window_size=100)
+        
+        # Buffers & Stats
+        self.static_loss = torch.tensor(0.0, device=self.device)
+        self.interval_tokens = 0
+        self.interval_time = 0.0
+        self.smoothed_s_per_step = None
+        self.vram_warned = False
+        
+        # Load Boundary Map if available
+        try:
+            boundary_path = Path("data/genesis_boundaries.pt")
+            if boundary_path.exists():
+                self.boundary_tensor = torch.load(boundary_path, map_location='cpu')
+                # Inject into loader if it's InfiniteGPULoader
+                if hasattr(self.train_loader, 'loader'):
+                    self.train_loader.loader.boundary_tensor = self.boundary_tensor.to(self.device)
+                print(f"  [DATA] Whole-Word Masking map loaded: {len(self.boundary_tensor)} nodes")
+            else:
+                self.boundary_tensor = None
+        except Exception as e:
+            print(f"  [WARN] Could not load boundary map: {e}")
+            self.boundary_tensor = None
+            
         # Performance Tracking
         self.interval_tokens = 0
         self.interval_time = 0.0
@@ -137,28 +178,116 @@ class GenesisTrainer:
         self.graph_warmup_steps = 10
         
         # Display model info on init if requested or standard
+        self.is_compiled = config.compile_model
+        self.wwm_loaded = self.boundary_tensor is not None
         self._print_startup_banner()
+        
+        # Session Logging
+        self.session_log = []
+        self.last_stats_display = ""
+        
+        # Async Stats Engine
+        self.stats_queue = queue.Queue(maxsize=1)
+        self.stats_stop_event = threading.Event()
+        self.stats_thread = threading.Thread(target=self._stats_worker_loop, daemon=True)
+        self.stats_thread.start()
 
     def _print_startup_banner(self):
-        """Print a clean summary of the training session."""
+        """Print a comprehensive dashboard header with hardware/model/train info."""
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         
-        # Estimate size based on precision
+        # Hardware Info
+        fa_config = FlashAttentionConfig()
+        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+        cuda_ver = torch.version.cuda if torch.cuda.is_available() else "N/A"
+        
+        # Model Size
         param_bytes = 4 if self.config.precision == "fp32" else 2
         model_size_mb = total_params * param_bytes / (1024**2)
         
-        print("\n" + "="*60)
-        print(f"  G E N E S I S   T R A I N E R")
-        print("="*60)
-        print(f"  [ARCH]  {self.config.precision.upper()} | {getattr(self.model.base, 'n_layers', 0)} Layers | {getattr(self.model.base, 'dim', 0)} Dim")
-        print(f"  [MODEL] Parameters: {total_params/1e6:.2f}M ({trainable_params/1e6:.2f}M trainable)")
-        print(f"  [MODEL] Estimated Weight Size: {model_size_mb:.2f} MB")
-        print(f"  [DATA]  Batch Size: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
-        print(f"  [DATA]  Seq Length: {self.config.max_seq_len}")
-        print(f"  [TRAIN] LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
-        print(f"  [TRAIN] Device: {self.device} | Steps: {self.config.max_steps}")
-        print("="*60 + "\n")
+        print("="*70)
+        print(f"  G E N E S I S   A R B I T E R   |   T R A I N I N G   D A S H B O A R D")
+        print("="*70)
+        
+        # System Segment
+        print(f" [SYSTEM] Device: {gpu_name} (CUDA {cuda_ver})")
+        print(f" [SYSTEM] Flash Attention: {fa_config.backend.upper()} | Precision: {self.config.precision.upper()}")
+        # WWM Status String
+        if self.wwm_active:
+            wwm_status = f"ACTIVE (Step {self.wwm_activated_step})"
+        elif self.wwm_loaded:
+            wwm_status = "LOADED (Waiting for Plateau)"
+        else:
+            wwm_status = "OFF"
+            
+        # Span Status String
+        if self.span_active:
+            span_status = f"ACTIVE (Step {self.span_activated_step})"
+        else:
+            span_status = "OFF"
+            
+        print(f" [SYSTEM] Compiled: {'YES' if self.is_compiled else 'NO'} | WWM Map: {wwm_status}")
+        print(f" [SYSTEM] Span Masking: {span_status}")
+        
+        # Model Segment
+        print("-" * 70)
+        print(f" [MODEL]  Layers: {getattr(self.model.base, 'n_layers', 0)} | Dim: {getattr(self.model.base, 'dim', 0)} | Heads: {getattr(self.model.base, 'n_heads', 0)}")
+        print(f" [MODEL]  Params: {total_params/1e6:.2f}M ({trainable_params/1e6:.2f}M trainable) | Vocab: {getattr(self.model, 'vocab_size', 0)}")
+        print(f" [MODEL]  Est. VRAM Weights: {model_size_mb:.2f} MB")
+        
+        # Training Segment
+        print("-" * 70)
+        print(f" [TRAIN]  Steps: {self.config.max_steps} | Batch: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
+        print(f" [TRAIN]  SeqLen: {self.config.max_seq_len} | LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
+        
+        # Research Segment
+        if self.wwm_active or self.span_active:
+            print("-" * 70)
+            if self.span_active:
+                print(f" [RESEARCH] Phase 2 (WWM): Final Improv: {self.wwm_final_improvement:.2f}%")
+                print(f" [RESEARCH] Phase 3 (Span): Current Improv: {self.span_improvement:.2f}%")
+            else:
+                wwm_imp = 0.0
+                if self.ema_at_wwm and self.loss_ema:
+                    wwm_imp = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
+                print(f" [RESEARCH] Phase 2 (WWM): Current Improv: {wwm_imp:.2f}%")
+        
+        print("="*70 + "\n")
+
+    def _refresh_console(self, current_info=None):
+        """Clear console and reprint banner + current info."""
+        os.system('cls' if os.name == 'nt' else 'clear')
+        self._print_startup_banner()
+        if current_info:
+            print(current_info)
+        if self.last_stats_display:
+            print(self.last_stats_display)
+        print("\n" + "-"*60)
+        print("  [CRTL+C] to safely abort and save session log.")
+        print("-"*60 + "\n")
+
+    def _stats_worker_loop(self):
+        """Background thread for heavy NumPy statistics calculation."""
+        while not self.stats_stop_event.is_set():
+            try:
+                data = self.stats_queue.get(timeout=1.0)
+                if data is None: break
+                
+                # Use the static method for thread-safe calculation
+                stats = self.analytics.calculate_from_data(data, data['progress'])
+                
+                if stats:
+                    display = f"\n--- LOSS DYNAMICS (Step {data['step']}) ---\n"
+                    display += json.dumps(stats, indent=2)
+                    display += "\n" + "-" * 40
+                    self.last_stats_display = display
+                
+                self.stats_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                pass
 
     def _train_step(self, tokens, labels, is_capture=False):
         """Single training step (Forward + Backward + Optimizer)"""
@@ -175,12 +304,13 @@ class GenesisTrainer:
         self.scaler.step(self.optimizer)
         self.scaler.update()
         
+        # Write to static buffer for analytics/logging (recorded in graph if capturing)
+        self.static_loss.copy_(scaled_loss)
+        
         return scaled_loss.detach()
 
     def train(self):
         """Execute the training loop."""
-        print_flash_attention_status()
-        
         self.model.train()
         t0 = time.time()
         
@@ -189,130 +319,250 @@ class GenesisTrainer:
         
         print(f"  [RUN] Training loop engaged. Monitoring diagnostics...")
         
-        while self.global_step < self.config.max_steps:
-            step_start = time.time()
-            # Training step
-            step_loss = torch.tensor(0.0, device=self.device)
-            
-            if self.config.use_cuda_graph and self.cuda_graph is not None:
-                # REPLAY MODE
-                try: batch = next(data_iter)
-                except StopIteration: batch = next(iter(self.train_loader))
+        try:
+            while self.global_step < self.config.max_steps:
+                step_start = time.time()
                 
-                self.static_tokens.copy_(batch['tokens'], non_blocking=True)
-                self.static_labels.copy_(batch['labels'], non_blocking=True)
-                self.cuda_graph.replay()
-                lr = self.scheduler.step(self.global_step)
-            else:
-                # EAGER/CAPTURE MODE
-                if self.config.use_cuda_graph and self.global_step == self.graph_warmup_steps:
-                    # Capture initialization
+                if self.config.use_cuda_graph and self.cuda_graph is not None:
+                    # REPLAY MODE
                     try: batch = next(data_iter)
                     except StopIteration: batch = next(iter(self.train_loader))
                     
-                    if self.static_tokens is None:
-                        self.static_tokens = batch['tokens'].clone().detach()
-                        self.static_labels = batch['labels'].clone().detach()
-                    
-                    print(f"  [SYSTEM] Capturing CUDA Graph at step {self.global_step}...")
-                    
-                    # Warmup for allocator
-                    s = torch.cuda.Stream()
-                    s.wait_stream(torch.cuda.current_stream())
-                    with torch.cuda.stream(s):
-                        for _ in range(3):
-                            self._train_step(self.static_tokens, self.static_labels)
-                    torch.cuda.current_stream().wait_stream(s)
-                    
-                    # Capture
-                    self.cuda_graph = torch.cuda.CUDAGraph()
-                    with torch.cuda.graph(self.cuda_graph):
-                        self._train_step(self.static_tokens, self.static_labels, is_capture=True)
-                    
-                    print("  [SYSTEM] CUDA Graph captured successfully.")
+                    self.static_tokens.copy_(batch['tokens'], non_blocking=True)
+                    self.static_labels.copy_(batch['labels'], non_blocking=True)
+                    self.cuda_graph.replay()
+                    curr_loss = self.static_loss.item()
+                    lr = self.scheduler.step(self.global_step)
                 else:
-                    # Standard Eager Step
-                    for _ in range(self.config.grad_accum_steps):
+                    # EAGER/CAPTURE MODE
+                    if self.config.use_cuda_graph and self.global_step == self.graph_warmup_steps:
                         try: batch = next(data_iter)
                         except StopIteration: batch = next(iter(self.train_loader))
-                        step_loss += self._train_step(batch['tokens'], batch['labels'])
+                        
+                        if self.static_tokens is None:
+                            self.static_tokens = batch['tokens'].clone().detach()
+                            self.static_labels = batch['labels'].clone().detach()
+                        
+                        print(f"  [SYSTEM] Capturing CUDA Graph at step {self.global_step}...")
+                        
+                        s = torch.cuda.Stream()
+                        s.wait_stream(torch.cuda.current_stream())
+                        with torch.cuda.stream(s):
+                            for _ in range(3):
+                                self._train_step(self.static_tokens, self.static_labels)
+                        torch.cuda.current_stream().wait_stream(s)
+                        
+                        self.cuda_graph = torch.cuda.CUDAGraph()
+                        with torch.cuda.graph(self.cuda_graph):
+                            self._train_step(self.static_tokens, self.static_labels, is_capture=True)
+                        
+                        print("  [SYSTEM] CUDA Graph captured successfully.")
+                        curr_loss = self.static_loss.item()
+                    else:
+                        # Standard Eager Step
+                        step_loss_sum = 0.0
+                        for _ in range(self.config.grad_accum_steps):
+                            try: batch = next(data_iter)
+                            except StopIteration: batch = next(iter(self.train_loader))
+                            step_loss_sum += self._train_step(batch['tokens'], batch['labels']).item()
+                        curr_loss = step_loss_sum
+                    
+                    lr = self.scheduler.step(self.global_step)
                 
-                lr = self.scheduler.step(self.global_step)
-            
-            # --- Performance Precision ---
-            # Isolate the training time for this step
-            self.interval_time += time.time() - step_start
-            
-            # Weighted token counting (Pure LM = 1x seq_len)
-            tokens_this_step = self.config.effective_batch_size * self.config.max_seq_len
-            self.interval_tokens += tokens_this_step
-            # ------------------------------
+                # Update Analytics (CPU)
+                self.analytics.update(curr_loss)
+                
+                # --- Performance Precision ---
+                self.interval_time += time.time() - step_start
+                tokens_this_step = self.config.effective_batch_size * self.config.max_seq_len
+                self.interval_tokens += tokens_this_step
+                # ------------------------------
 
-            self.global_step += 1
-            
-            # Logging
-            if self.global_step % self.config.log_interval == 0:
-                # Optimized throughput (excluded validation/logging/checkpointing lag)
-                tokens_per_sec = self.interval_tokens / max(self.interval_time, 1e-6)
+                self.global_step += 1
                 
-                # Pull loss to CPU only for logging
-                curr_loss = step_loss.item()
-                
-                # Calculate smoothed ETA (Alpha = 0.2 for smoothing)
-                s_per_step = self.interval_time / self.config.log_interval
-                if self.smoothed_s_per_step is None:
-                    self.smoothed_s_per_step = s_per_step
-                else:
-                    self.smoothed_s_per_step = 0.2 * s_per_step + 0.8 * self.smoothed_s_per_step
-                
-                steps_remaining = self.config.max_steps - self.global_step
-                eta_s = steps_remaining * self.smoothed_s_per_step
-                
-                # Format ETA as HH:MM:SS
-                from datetime import timedelta
-                eta_str = str(timedelta(seconds=int(eta_s)))
-                
-                print(f"Step {self.global_step}/{self.config.max_steps}: Loss {curr_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}")
-                
-                # Monitor VRAM
-                gpu_mem_gb = 0.0
-                if self.device.type == 'cuda':
-                    gpu_mem_gb = torch.cuda.max_memory_reserved() / (1024**3)
-                    # Proactive VRAM Warning (if > 95% of 12GB)
-                    if not self.vram_warned and gpu_mem_gb > 11.4:
-                        print(f"\n  [CAUTION] VRAM usage is critical ({gpu_mem_gb:.2f} GB).")
-                        print("  Windows driver-level swapping may cause periodic performance dips.")
-                        self.vram_warned = True
+                # Buffer log for session file
+                self.session_log.append({
+                    "step": self.global_step,
+                    "loss": curr_loss,
+                    "lr": lr,
+                    "wwm_imp": self.wwm_final_improvement if self.span_active else (
+                        (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
+                    ),
+                    "span_imp": self.span_improvement if self.span_active else 0.0,
+                    "time": time.time()
+                })
 
-                self.logger.log_training_step(
-                    step=self.global_step,
-                    loss=curr_loss,
-                    learning_rate=lr,
-                    tokens_per_sec=tokens_per_sec,
-                    gpu_memory_gb=gpu_mem_gb
-                )
+                # Logging
+                if self.global_step % self.config.log_interval == 0:
+                    tokens_per_sec = self.interval_tokens / max(self.interval_time, 1e-6)
+                    
+                    s_per_step = self.interval_time / self.config.log_interval
+                    if self.smoothed_s_per_step is None:
+                        self.smoothed_s_per_step = s_per_step
+                    else:
+                        self.smoothed_s_per_step = 0.2 * s_per_step + 0.8 * self.smoothed_s_per_step
+                    
+                    steps_remaining = self.config.max_steps - self.global_step
+                    eta_s = steps_remaining * self.smoothed_s_per_step
+                    
+                    from datetime import timedelta
+                    eta_str = str(timedelta(seconds=int(eta_s)))
+                    
+                    log_line = f"Step {self.global_step}/{self.config.max_steps}: Loss {curr_loss:.4f} | LR {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA {eta_str}"
+                    self._refresh_console(log_line)
+                    
+                    # --- Plateau Detection (Dynamic WWM Trigger) ---
+                    if self.loss_ema is None:
+                        self.loss_ema = curr_loss
+                    else:
+                        self.loss_ema = 0.95 * self.loss_ema + 0.05 * curr_loss
+                    
+                    if not self.wwm_active and self.global_step > self.config.wwm_trigger_steps and self.boundary_tensor is not None:
+                        if hasattr(self, 'last_ema_check'):
+                            steps_since_check = self.global_step - self.last_ema_check
+                            if steps_since_check >= self.config.wwm_window:
+                                improvement = (self.ema_at_last_check - self.loss_ema) / max(self.ema_at_last_check, 1e-6)
+                                if improvement < self.config.wwm_threshold: 
+                                    print(f"\n  [DYNAMIC] Plateau detected (Improvement: {improvement*100:.3f}%).")
+                                    print("  [DYNAMIC] Activating Whole-Word Masking (WWM) to stimulate Grokking...")
+                                    self.wwm_active = True
+                                    self.wwm_activated_step = self.global_step
+                                    self.ema_at_wwm = self.loss_ema # Capture Baseline
+                                    
+                                    # Permanent Logging
+                                    self.logger.log_grokking_signal(
+                                        step=self.global_step,
+                                        signal_type="wwm_activation",
+                                        value=1.0,
+                                        description="Dynamic Whole-Word Masking activated via loss plateau."
+                                    )
+                                    self.logger.log_metrics({"Research/WWM_Active": 1.0}, self.global_step)
+                                    
+                                    if hasattr(self.train_loader, 'loader'):
+                                        self.train_loader.loader.mask_prob = 0.15
+                                        self.train_loader.loader.use_wwm = True
+                                
+                                self.last_ema_check = self.global_step
+                                self.ema_at_last_check = self.loss_ema
+                        else:
+                            self.last_ema_check = self.global_step
+                            self.ema_at_last_check = self.loss_ema
+                            
+                    # --- Phase 3: Span Masking Trigger (Contiguous Grokking) ---
+                    elif not self.span_active and self.wwm_active and (self.global_step - self.wwm_activated_step) > self.config.span_trigger_steps:
+                        if hasattr(self, 'last_ema_check'):
+                            steps_since_check = self.global_step - self.last_ema_check
+                            if steps_since_check >= self.config.span_window:
+                                improvement = (self.ema_at_last_check - self.loss_ema) / max(self.ema_at_last_check, 1e-6)
+                                if improvement < self.config.span_threshold:
+                                    print(f"\n  [DYNAMIC] Phase 3 Plateau detected (Improvement: {improvement*100:.3f}%).")
+                                    print(f"  [DYNAMIC] Activating Word Sequence (Span) Masking (Len: {self.config.span_min_len}-{self.config.span_max_len})...")
+                                    self.span_active = True
+                                    self.span_activated_step = self.global_step
+                                    
+                                    # Lock WWM Stats
+                                    if self.ema_at_wwm and self.loss_ema:
+                                        self.wwm_final_improvement = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
+                                    
+                                    self.ema_at_span = self.loss_ema # Capture New Baseline
+                                    
+                                    # Permanent Logging
+                                    self.logger.log_grokking_signal(
+                                        step=self.global_step,
+                                        signal_type="span_activation",
+                                        value=1.0,
+                                        description=f"Phase 3 Word Sequence (Span) Masking activated (Len: {self.config.span_min_len}-{self.config.span_max_len})."
+                                    )
+                                    self.logger.log_metrics({"Research/Span_Active": 1.0}, self.global_step)
+                                    
+                                    if hasattr(self.train_loader, 'loader'):
+                                        self.train_loader.loader.use_span = True
+                                        self.train_loader.loader.span_range = (self.config.span_min_len, self.config.span_max_len)
+                                        # m_prob remains 0.15 but now covers random spans per batch
+                                
+                                self.last_ema_check = self.global_step
+                                self.ema_at_last_check = self.loss_ema
+                        else:
+                            self.last_ema_check = self.global_step
+                            self.ema_at_last_check = self.loss_ema
+                    # -----------------------------------------------
+
+                    # Monitor VRAM
+                    gpu_mem_gb = 0.0
+                    if self.device.type == 'cuda':
+                        gpu_mem_gb = torch.cuda.max_memory_reserved() / (1024**3)
+                        if not self.vram_warned and gpu_mem_gb > 11.4:
+                            print(f"\n  [CAUTION] VRAM usage is critical ({gpu_mem_gb:.2f} GB).")
+                            self.vram_warned = True
+
+                    current_wwm_imp = self.wwm_final_improvement if self.span_active else (
+                        (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
+                    )
+
+                    self.logger.log_training_step(
+                        step=self.global_step,
+                        loss=curr_loss,
+                        learning_rate=lr,
+                        wwm_improvement=current_wwm_imp,
+                        span_improvement=self.span_improvement,
+                        tokens_per_sec=tokens_per_sec,
+                        gpu_memory_gb=gpu_mem_gb
+                    )
+                    
+                    self.interval_tokens = 0
+                    self.interval_time = 0.0
+                    
+                    # Update live research stats for Span
+                    if self.span_active and self.ema_at_span:
+                        self.span_improvement = (self.ema_at_span - self.loss_ema) / self.ema_at_span * 100
+
+                # --- Asynchronous Statistics Update ---
+                if self.stats_queue.empty():
+                    try:
+                        # Snapshot data for the background thread (NumPy math)
+                        snapshot = {
+                            "y": np.array(list(self.analytics.loss_buffer)),
+                            "ema_100": self.analytics.ema_100,
+                            "global_min": self.analytics.global_min,
+                            "stagnation_steps": self.analytics.stagnation_steps,
+                            "spikes": list(self.analytics.spikes),
+                            "total_steps": self.analytics.total_steps,
+                            "window_size": self.analytics.window_size,
+                            "step": self.global_step,
+                            "progress": (self.global_step / self.config.max_steps) * 100
+                        }
+                        self.stats_queue.put_nowait(snapshot)
+                    except (queue.Full, RuntimeError):
+                        pass
                 
-                # Reset interval counters
-                self.interval_tokens = 0
-                self.interval_time = 0.0
-                
-            # Internal step loss is already reset to 0.0 at the start of the while loop
-                
-            # 5. Validation
-            if self.config.enable_validation and self.global_step % self.config.val_interval == 0:
-                self.validate()
-                
-            # Evaluation
-            # 4. Extensive Evaluation
-            if self.config.enable_extensive_eval and self.global_step % self.config.eval_interval == 0:
-                self.evaluate_extensive()
-                
-            # Checkpointing
-            if self.global_step % self.config.save_interval == 0:
-                self.save_checkpoint()
-                
-            # Callbacks
-            self.callbacks.on_batch_end(self.global_step, self.model, step_loss)
+                # 5. Validation
+                if self.config.enable_validation and self.global_step % self.config.val_interval == 0:
+                    self.validate()
+                    
+                # 4. Extensive Evaluation
+                if self.config.enable_extensive_eval and self.global_step % self.config.eval_interval == 0:
+                    self.evaluate_extensive()
+                    
+                # Checkpointing
+                if self.global_step % self.config.save_interval == 0:
+                    self.save_checkpoint()
+                    
+                # Callbacks
+                self.callbacks.on_batch_end(self.global_step, self.model, curr_loss)
+            
+            # Successful Completion
+            self._save_session_log()
+            self.logger.finalize_experiment(status="completed")
+            
+        except KeyboardInterrupt:
+            print(f"\n\n  [SYSTEM] Safe abort triggered by user.")
+            self.stats_stop_event.set()
+            if self.stats_queue.empty(): self.stats_queue.put(None)
+            self._save_session_log()
+            self.save_checkpoint(f"checkpoints/abort_step_{self.global_step}.pt")
+            self.logger.finalize_experiment(status="aborted")
+            print("  [SYSTEM] Cleanup complete. Shutdown successful.")
+            sys.exit(0)
             
     def validate(self):
         """Run validation loop."""
@@ -386,6 +636,29 @@ class GenesisTrainer:
         
         torch.save(checkpoint, path)
         print(f"Checkpoint saved: {path}")
+
+    def _save_session_log(self):
+        """Save the in-memory session log to a text file."""
+        if not self.session_log:
+            return
+            
+        log_dir = Path("logs/sessions")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = int(time.time())
+        log_path = log_dir / f"session_{timestamp}_step_{self.global_step}.txt"
+        
+        try:
+            with open(log_path, "w") as f:
+                f.write(f"GENESIS SESSION LOG - Step {self.global_step}\n")
+                f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+                f.write("-" * 60 + "\n")
+                f.write("Step\tLoss\tLR\tWWM_Imp\tSpan_Imp\tTime\n")
+                for entry in self.session_log:
+                    f.write(f"{entry['step']}\t{entry['loss']:.6f}\t{entry['lr']:.2e}\t{entry.get('wwm_imp',0):.2f}%\t{entry.get('span_imp',0):.2f}%\t{entry['time']}\n")
+            print(f"  [DATA] Session log saved to: {log_path}")
+        except Exception as e:
+            print(f"  [WARN] Failed to save session log: {e}")
 
     def load_checkpoint(self, path):
         """Load checkpoint."""

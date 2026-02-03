@@ -13,7 +13,7 @@ max_tokens = 200
 temperature = 0
 top_k = 40
 top_p = 0.9
-repetition_penalty = 1.1
+repetition_penalty = 1.3
 
 # UX Settings
 stream_output = true
@@ -25,27 +25,39 @@ stop_sequences = ["\n\n\n"]
 mode = "microscope"
 
 # Optimization Parameters
-learning_rate = 6e-5
-weight_decay = 0.4
-max_steps = 200000
+learning_rate = 5e-5
+weight_decay = 0.01
+max_steps = 10000
 batch_size = 8
 grad_accum_steps = 8
 lr_schedule = "cosine"
-warmup_steps = 1000
+warmup_steps = 100
 min_lr_ratio = 0.05
 
 # Checkpoint Control
-save_interval = 500
+save_interval = 100
 resume = true
 autoresume_best = true
+
+# Dynamic WWM Trigger (Semantic Grokking)
+wwm_trigger_steps = 500  # Initial steps to wait
+wwm_window = 100         # Check improvement every N steps
+wwm_threshold = 0.005     # Trigger if improvement < 0.5%
+
+# Phase 3: Span Masking (Structural Grokking)
+span_trigger_steps = 500 # Wait at least N steps AFTER WWM activation
+span_window = 100         # Check improvement every N steps
+span_threshold = 0.002    # Trigger if improvement < 0.2%
+span_min_len = 3
+span_max_len = 5
 
 [model]
 # Default architecture (if not using a preset mode)
 vocab_size = "auto"
-dim = 128
+dim = 192
 n_layers = 12
-n_heads = 4
-intermediate_size = 512
+n_heads = 6
+intermediate_size = 768
 norm_type = "deepnorm"
 max_seq_len = 8192
 
@@ -58,7 +70,7 @@ tokenizer_path = "data/genesis_char_tokenizer.json"
 cache_path = "data/genesis_data_cache.pt"
 
 # Sampling settings
-max_seq_len = 2048
+max_seq_len = 8192
 target_languages = []  # Empty for all languages
 
 [evaluation]
@@ -92,7 +104,7 @@ verbose_logging = true
 use_libuv = "0"
 
 [tasks]
-# Multi-task training distribution (sums to 1.0)
+# Training distribution (sums to 1.0)
 lm = 1.0
 
 [sweep]

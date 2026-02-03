@@ -74,7 +74,8 @@ def print_menu():
     print(f"{Colors.GREEN}[3]{Colors.ENDC} {Colors.BOLD}Corpus Analysis{Colors.ENDC}")
     print("    - [3a] Count unique words")
     print("    - [3b] Count logical connectives")
-    print("    - [3c] Pre-process Data (Create Training Data Cache File)\n")
+    print("    - [3c] Pre-process Data (Create Training Data Cache File)")
+    print("    - [3d] Generate WWM Boundary Map (Level-Up Training)\n")
     
     print(f"{Colors.GREEN}[4]{Colors.ENDC} {Colors.BOLD}Documentation{Colors.ENDC}")
     print("    - [4a] Quick Reference Guide")
@@ -272,6 +273,9 @@ def main():
             
         elif choice == '3c':
             run_script('tools/update_data_cache.py', 'Updating VRAM Data Cache')
+        
+        elif choice == '3d':
+            run_script('tools/generate_boundary_map.py', 'Generating Whole-Word Masking (WWM) Boundary Map')
         
         elif choice == '4a':
             open_documentation('docs/reference/QUICK_REFERENCE.md')

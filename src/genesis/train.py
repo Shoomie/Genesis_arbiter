@@ -63,6 +63,11 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     if args.eval_interval: train_config.eval_interval = args.eval_interval
     if args.use_cuda_graph: train_config.use_cuda_graph = True
     
+    # CLI Overrides for WWM
+    if args.wwm_trigger: train_config.wwm_trigger_steps = args.wwm_trigger
+    if args.wwm_window: train_config.wwm_window = args.wwm_window
+    if args.wwm_threshold: train_config.wwm_threshold = args.wwm_threshold
+    
     # --- Model Resolution ---
     # Start with standard fallback
     mode = args.mode or train_cfg_dict.get("mode", "standard")
@@ -126,6 +131,11 @@ def main():
     parser.add_argument("--steps", type=int)
     parser.add_argument("--val-interval", type=int)
     parser.add_argument("--eval-interval", type=int)
+    
+    # WWM Trigger Overrides
+    parser.add_argument("--wwm-trigger", type=int, help="Steps to wait before checking for plateau")
+    parser.add_argument("--wwm-window", type=int, help="Window size for loss comparison")
+    parser.add_argument("--wwm-threshold", type=float, help="Improvement threshold (0.005 = 0.5%%)")
     
     args = parser.parse_args()
     

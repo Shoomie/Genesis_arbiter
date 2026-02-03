@@ -161,6 +161,8 @@ class ArbiterLogger:
                     loss REAL,
                     grad_norm REAL,
                     learning_rate REAL,
+                    wwm_improvement REAL,
+                    span_improvement REAL,
                     tokens_per_sec REAL,
                     gpu_memory_gb REAL,
                     timestamp TEXT,
@@ -227,11 +229,13 @@ class ArbiterLogger:
                     cursor.execute("""
                         INSERT INTO training_logs (
                             run_id, step, loss, grad_norm, learning_rate,
+                            wwm_improvement, span_improvement,
                             tokens_per_sec, gpu_memory_gb, timestamp
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         data['run_id'], data['step'], data['loss'], 
                         data['grad_norm'], data['learning_rate'],
+                        data.get('wwm_improvement', 0.0), data.get('span_improvement', 0.0),
                         data['tokens_per_sec'], data['gpu_memory_gb'], 
                         data['timestamp']
                     ))
@@ -324,6 +328,8 @@ class ArbiterLogger:
         loss: float,
         grad_norm: Optional[float] = None,
         learning_rate: Optional[float] = None,
+        wwm_improvement: Optional[float] = None,
+        span_improvement: Optional[float] = None,
         tokens_per_sec: Optional[float] = None,
         gpu_memory_gb: Optional[float] = None
     ):
@@ -340,6 +346,8 @@ class ArbiterLogger:
                 'loss': loss,
                 'grad_norm': grad_norm,
                 'learning_rate': learning_rate,
+                'wwm_improvement': wwm_improvement,
+                'span_improvement': span_improvement,
                 'tokens_per_sec': tokens_per_sec,
                 'gpu_memory_gb': gpu_memory_gb,
                 'timestamp': datetime.now().isoformat()
@@ -355,6 +363,10 @@ class ArbiterLogger:
                 self.tensorboard_writer.add_scalar('Train/LearningRate', learning_rate, step)
             if tokens_per_sec is not None:
                 self.tensorboard_writer.add_scalar('System/TokensPerSec', tokens_per_sec, step)
+            if wwm_improvement is not None:
+                self.tensorboard_writer.add_scalar('Research/WWM_Improvement_%', wwm_improvement, step)
+            if span_improvement is not None:
+                self.tensorboard_writer.add_scalar('Research/Span_Improvement_%', span_improvement, step)
     
     def log_metrics(self, metrics: Dict[str, float], step: int):
         """

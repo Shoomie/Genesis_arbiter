@@ -19,9 +19,11 @@ class InfiniteGPULoader:
         max_seq_len: int,
         task_distribution: Dict[str, float],
         device: torch.device,
+        boundary_tensor: Optional[torch.Tensor] = None,
         seed: int = 42
     ):
         self.data_tensor = data_tensor.to(device, non_blocking=True)
+        self.boundary_tensor = boundary_tensor.to(device, non_blocking=True) if boundary_tensor is not None else None
         self.verse_indices = verse_indices
         self.locale_map = locale_map
         self.batch_size = batch_size
@@ -32,24 +34,33 @@ class InfiniteGPULoader:
         self.device = device
         self.rng = np.random.RandomState(seed)
         
-        # Pre-convert verse_indices to tensor for faster access on GPU if possible
-        # verse_indices is list of (start, len)
+        # Pre-convert verse_indices to tensor for faster access on GPU
         self.verse_starts = torch.tensor([v[0] for v in verse_indices], device=device, dtype=torch.long)
         self.verse_lens = torch.tensor([v[1] for v in verse_indices], device=device, dtype=torch.long)
         
         print(f"[OK] GPU DataLoader initialized on {device}")
-        print(f"     Dataset size: {len(data_tensor)} tokens, {len(verse_indices)} verses")
+        if self.boundary_tensor is not None:
+            print(f"     Whole-Word Masking (WWM) enabled via boundary map.")
         
         # Compatibility aliases for ProceduralEvaluator
         self.locale_verse_map = self.locale_map
 
         # Pre-compute grid for vectorization
         self.grid = torch.arange(max_seq_len, device=device).unsqueeze(0) # [1, max_seq_len]
+        
+        # Masking State (Controlled by Trainer)
+        self.mask_prob = 0.0
+        self.use_wwm = False
+        self.use_span = False
+        self.span_range = (1, 1) # (min, max)
 
-    def _sample_lm(self):
-        """Vectorized sample for Language Modeling with Dense Packing."""
-        # 1. Randomly pick batch_size start points anywhere in the tensor
-        # Subtract max_seq_len + 1 to ensure we have a full sequence + 1 for label shift
+    def _sample_lm(self, mask_prob: Optional[float] = None, use_wwm: Optional[bool] = None):
+        """Vectorized sample for Language Modeling with optional Masking."""
+        # Use internal state if not provided
+        m_prob = mask_prob if mask_prob is not None else self.mask_prob
+        u_wwm = use_wwm if use_wwm is not None else self.use_wwm
+        
+        # 1. Randomly pick batch_size start points
         max_start = len(self.data_tensor) - self.max_seq_len - 1
         starts = torch.randint(0, max_start, (self.batch_size,), device=self.device)
         
@@ -59,10 +70,49 @@ class InfiniteGPULoader:
         # 3. Gather tokens
         batch_tokens = self.data_tensor[indices]
         
-        # 4. Generate labels (shifted tokens)
+        # 4. Generate labels (standard shift)
         label_indices = indices + 1
         batch_labels = self.data_tensor[label_indices]
         
+        # 5. Optional Masking (for WWM feasibility)
+        # In a causal model, this "scrambles" the input to force semantic recovery.
+        if m_prob > 0:
+            if u_wwm and self.boundary_tensor is not None:
+                # Vectorized Whole-Word Masking
+                mask_boundaries = self.boundary_tensor[indices]
+                # word_ids: [Batch, SeqLen] (0 to ~SeqLen/3)
+                word_ids = mask_boundaries.cumsum(dim=1)
+                
+                # Each word gets a random value.
+                word_rand = torch.rand(self.batch_size, self.max_seq_len + 1, device=self.device)
+                word_mask = word_rand < m_prob
+                
+                # Optional Phase 3: Span Masking (Word Dilation)
+                if self.use_span:
+                    min_s, max_s = self.span_range
+                    # Sample a span length for this specific batch
+                    current_span = int(torch.randint(min_s, max_s + 1, (1,)).item()) if min_s < max_s else min_s
+                    
+                    if current_span > 1:
+                        # Simple dilation: if a word is masked, mask the next N-1 words too.
+                        combined = word_mask.clone()
+                        for s in range(1, current_span):
+                            # Shift word mask to the right and OR
+                            shifted = torch.zeros_like(word_mask)
+                            shifted[:, s:] = word_mask[:, :-s]
+                            combined = combined | shifted
+                        word_mask = combined
+
+                # Distribute random values / masks to tokens based on word_ids
+                mask = torch.gather(word_mask, 1, word_ids)
+            else:
+                # Random Byte Masking
+                mask = torch.rand(self.batch_size, self.max_seq_len, device=self.device) < m_prob
+            
+            # Apply mask to input (using pad_id as mask)
+            # We skip masking the first token sometimes or just mask everything
+            batch_tokens = torch.where(mask, 0, batch_tokens) 
+            
         return {"task": "lm", "tokens": batch_tokens, "labels": batch_labels}
 
     def __iter__(self):
