@@ -214,25 +214,28 @@ class GenesisTrainer:
         print(f"  G E N E S I S   A R B I T E R   |   T R A I N I N G   D A S H B O A R D")
         print("="*65)
         
-        # System Segment
-        print(f" [SYSTEM] Device: {gpu_name} (CUDA {cuda_ver})")
-        print(f" [SYSTEM] Flash Attention: {fa_config.backend.upper()} | Precision: {self.config.precision.upper()}")
-        # WWM Status String
-        if self.wwm_active:
-            wwm_status = f"ACTIVE (Step {self.wwm_activated_step})"
-        elif self.wwm_loaded:
-            wwm_status = "LOADED (Waiting for Plateau)"
-        else:
-            wwm_status = "OFF"
+        # Research Status Lines
+        m_prob = 0.0
+        r_status = ""
+        loader = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+        if hasattr(loader, 'mask_prob'):
+            m_prob = loader.mask_prob
             
-        # Span Status String
         if self.span_active:
-            span_status = f"ACTIVE (Step {self.span_activated_step})"
+            ramp_p = min((self.global_step - self.span_activated_step) / max(self.config.span_ramp_steps, 1), 1.0) * 100
+            r_status = f"Phase 3 (SPAN) @ {m_prob*100:.1f}% " + (f"[{ramp_p:.0f}% RAMPED]" if ramp_p < 100 else "[STABLE]")
+        elif self.wwm_active:
+            ramp_p = min((self.global_step - self.wwm_activated_step) / max(self.config.wwm_ramp_steps, 1), 1.0) * 100
+            r_status = f"Phase 2 (WWM) @ {m_prob*100:.1f}% " + (f"[{ramp_p:.0f}% RAMPED]" if ramp_p < 100 else "[STABLE]")
         else:
-            span_status = "OFF"
+            r_status = "Phase 1 (BYTE) @ 0.0%"
             
-        print(f" [SYSTEM] Compiled: {'YES' if self.is_compiled else 'NO'} | WWM Map: {wwm_status}")
-        print(f" [SYSTEM] Span Masking: {span_status}")
+        lr_status = "[STUNNED]" if self.lr_stun_executed else "[COSINE]"
+        stag_count = f"{self.analytics.stagnation_steps}/{self.config.plateau_lr_patience}"
+            
+        print(f" [RESEARCH] {r_status}")
+        print(f" [RESEARCH] LR: {lr_status} | Stagnation: {stag_count} steps")
+        print(f" [SYSTEM]   Compiled: {'YES' if self.is_compiled else 'NO'}")
         
         # Model Segment
         print("-" * 65)
@@ -371,10 +374,25 @@ class GenesisTrainer:
                         steps_into_phase = self.global_step - self.span_activated_step
                         ramp = min(steps_into_phase / max(self.config.span_ramp_steps, 1), 1.0)
                         loader.mask_prob = 0.05 + (self.config.span_mask_prob - 0.05) * ramp
+                        self.mask_prob_active = loader.mask_prob
+                        
+                        # Peak Anchoring: Capture baseline once ramp is finished
+                        if steps_into_phase == self.config.span_ramp_steps:
+                            self.ema_at_span = self.loss_ema
+                            print(f"\n  [CHECKPOINT] Phase 3 Calibration Complete. Baseline anchored at {self.loss_ema:.4f}")
+                            
                     elif self.wwm_active:
                         steps_into_phase = self.global_step - self.wwm_activated_step
                         ramp = min(steps_into_phase / max(self.config.wwm_ramp_steps, 1), 1.0)
                         loader.mask_prob = 0.05 + (self.config.wwm_mask_prob - 0.05) * ramp
+                        self.mask_prob_active = loader.mask_prob
+
+                        # Peak Anchoring: Capture baseline once ramp is finished
+                        if steps_into_phase == self.config.wwm_ramp_steps:
+                            self.ema_at_wwm = self.loss_ema
+                            print(f"\n  [CHECKPOINT] Phase 2 Calibration Complete. Baseline anchored at {self.loss_ema:.4f}")
+                else:
+                    self.mask_prob_active = 0.0
 
                 # 2. Forward and Backward
                 if self.config.use_cuda_graph and self.cuda_graph is not None:
@@ -459,9 +477,11 @@ class GenesisTrainer:
                     "loss": curr_loss,
                     "lr": lr,
                     "wwm_imp": self.wwm_final_improvement if self.span_active else (
-                        (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
-                    ),
-                    "span_imp": self.span_improvement if self.span_active else 0.0,
+                    0.0 if self.ema_at_wwm is None else (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
+                ),
+                "span_imp": self.span_improvement if self.span_active else (
+                    0.0 if self.ema_at_span is None else (self.ema_at_span - self.loss_ema) / self.ema_at_span * 100
+                ),
                     "time": time.time()
                 })
 
@@ -495,7 +515,7 @@ class GenesisTrainer:
                                     print("  [DYNAMIC] Activating Whole-Word Masking (WWM) to stimulate Grokking...")
                                     self.wwm_active = True
                                     self.wwm_activated_step = self.global_step
-                                    self.ema_at_wwm = self.loss_ema # Capture Baseline
+                                    # self.ema_at_wwm set later via Peak Anchoring
                                     
                                     # Permanent Logging
                                     self.logger.log_grokking_signal(
@@ -532,6 +552,7 @@ class GenesisTrainer:
                                     print(f"  [DYNAMIC] Activating Word Sequence (Span) Masking (Len: {self.config.span_min_len}-{self.config.span_max_len})...")
                                     self.span_active = True
                                     self.span_activated_step = self.global_step
+                                    # self.ema_at_span set later via Peak Anchoring
                                     
                                     # Lock WWM Stats
                                     if self.ema_at_wwm and self.loss_ema:
