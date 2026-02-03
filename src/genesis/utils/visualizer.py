@@ -37,9 +37,12 @@ class GenesisVisualizer:
     def start(self):
         """Start the dashboard server in a background thread."""
         def run_server():
-            config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="error")
-            server = uvicorn.Server(config)
-            server.run()
+            try:
+                config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="error")
+                server = uvicorn.Server(config)
+                server.run()
+            except Exception as e:
+                print(f" [VISUAL] Dashboard server failed to start: {e}")
         
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()

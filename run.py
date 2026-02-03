@@ -290,6 +290,7 @@ def main():
         elif choice == '0':
             print(f"\n{Colors.CYAN}Thank you for using Genesis!{Colors.ENDC}")
             print(f"{Colors.YELLOW}Deep Reasoning in Data-Constrained Regimes{Colors.ENDC}\n")
+            print("\033[?25h\033[0m", end="", flush=True) # Reset cursor and colors
             sys.exit(0)
         
         else:
@@ -301,5 +302,6 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print(f"\n\n{Colors.YELLOW}Interrupted by user. Exiting...{Colors.ENDC}\n")
+        print("\033[?25h\033[0m", end="", flush=True)
         sys.exit(0)
 

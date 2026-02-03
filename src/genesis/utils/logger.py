@@ -32,7 +32,10 @@ def enable_windows_ansi():
     if os.name == 'nt':
         kernel32 = ctypes.windll.kernel32
         # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x4
+        # Also ensure cursor is visible \033[?25h
         kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    # Global terminal reset sequence
+    print("\033[?25h", end="", flush=True)
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -129,6 +132,9 @@ class ArbiterLogger:
         # Grokking detection state
         self._grokking_detected = False
         self._val_loss_history: List[float] = []
+        
+        # Ensure database schema is up-to-date
+        self._migrate_database()
     
     def _init_database(self):
         """Initialize SQLite database with required tables."""
@@ -209,7 +215,40 @@ class ArbiterLogger:
                     FOREIGN KEY (run_id) REFERENCES experiments(run_id)
                 )
             """)
+
+            # Ensure grokking_signals table exists (missing in some versions)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS grokking_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
+                    step INTEGER,
+                    signal_type TEXT,
+                    value REAL,
+                    description TEXT,
+                    timestamp TEXT,
+                    FOREIGN KEY (run_id) REFERENCES experiments(run_id)
+                )
+            """)
             
+            conn.commit()
+
+    def _migrate_database(self):
+        """Check for missing columns and add them if necessary."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 1. Check training_logs for wwm_improvement and span_improvement
+            cursor.execute("PRAGMA table_info(training_logs)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if "wwm_improvement" not in columns:
+                print("[ArbiterLogger] Migrating training_logs: Adding wwm_improvement column...")
+                cursor.execute("ALTER TABLE training_logs ADD COLUMN wwm_improvement REAL DEFAULT 0.0")
+            
+            if "span_improvement" not in columns:
+                print("[ArbiterLogger] Migrating training_logs: Adding span_improvement column...")
+                cursor.execute("ALTER TABLE training_logs ADD COLUMN span_improvement REAL DEFAULT 0.0")
+                
             conn.commit()
     
     @contextmanager

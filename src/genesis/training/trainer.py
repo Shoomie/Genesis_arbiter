@@ -48,6 +48,7 @@ class GenesisTrainer:
         boundary_tensor: Optional[torch.Tensor] = None
     ):
         enable_windows_ansi() # Ensure fast console updates work on Windows
+        print("\033[?25h", end="", flush=True) # Ensure cursor is visible
         self.model = model
         self.tokenizer = tokenizer
         self.train_loader = train_loader
@@ -677,11 +678,11 @@ class GenesisTrainer:
                         pass
                 
                 # 5. Validation
-                if self.config.enable_validation and self.global_step % self.config.val_interval == 0:
+                if self.config.enable_validation and self.config.val_interval > 0 and self.global_step % self.config.val_interval == 0:
                     self.validate()
                     
                 # 4. Extensive Evaluation
-                if self.config.enable_extensive_eval and self.global_step % self.config.eval_interval == 0:
+                if self.config.enable_extensive_eval and self.config.eval_interval > 0 and self.global_step % self.config.eval_interval == 0:
                     self.evaluate_extensive()
                     
                 # Checkpointing
@@ -703,6 +704,7 @@ class GenesisTrainer:
             self.save_checkpoint(f"checkpoints/abort_step_{self.global_step}.pt")
             self.logger.finalize_experiment(status="aborted")
             print("  [SYSTEM] Cleanup complete. Shutdown successful.")
+            print("\033[?25h", end="", flush=True) # Restore cursor
             sys.exit(0)
             
     def validate(self):

@@ -55,20 +55,20 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     train_config = TrainingConfig.from_dict(merged_config)
     
     # Merge CLI overrides for training
-    if args.learning_rate: train_config.learning_rate = args.learning_rate
-    if args.weight_decay: train_config.weight_decay = args.weight_decay
-    if args.batch_size: train_config.batch_size = args.batch_size
-    if args.steps: train_config.max_steps = args.steps
-    if args.val_interval: train_config.val_interval = args.val_interval
-    if args.eval_interval: train_config.eval_interval = args.eval_interval
+    if args.learning_rate is not None: train_config.learning_rate = args.learning_rate
+    if args.weight_decay is not None: train_config.weight_decay = args.weight_decay
+    if args.batch_size is not None: train_config.batch_size = args.batch_size
+    if args.steps is not None: train_config.max_steps = args.steps
+    if args.val_interval is not None: train_config.val_interval = args.val_interval
+    if args.eval_interval is not None: train_config.eval_interval = args.eval_interval
     if args.use_cuda_graph: train_config.use_cuda_graph = True
     
     # CLI Overrides for WWM
-    if args.wwm_trigger: train_config.wwm_trigger_steps = args.wwm_trigger
-    if args.wwm_window: train_config.wwm_window = args.wwm_window
-    if args.wwm_threshold: train_config.wwm_threshold = args.wwm_threshold
-    if args.wwm_prob: train_config.wwm_mask_prob = args.wwm_prob
-    if args.span_prob: train_config.span_mask_prob = args.span_prob
+    if args.wwm_trigger is not None: train_config.wwm_trigger_steps = args.wwm_trigger
+    if args.wwm_window is not None: train_config.wwm_window = args.wwm_window
+    if args.wwm_threshold is not None: train_config.wwm_threshold = args.wwm_threshold
+    if args.wwm_prob is not None: train_config.wwm_mask_prob = args.wwm_prob
+    if args.span_prob is not None: train_config.span_mask_prob = args.span_prob
     
     # --- Model Resolution ---
     # Start with standard fallback
