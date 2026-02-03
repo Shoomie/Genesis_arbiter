@@ -43,11 +43,13 @@ autoresume_best = true
 wwm_trigger_steps = 500  # Initial steps to wait
 wwm_window = 100         # Check improvement every N steps
 wwm_threshold = 0.005     # Trigger if improvement < 0.5%
+wwm_mask_prob = 0.15      # Percentage of words to mask in Phase 2
 
 # Phase 3: Span Masking (Structural Grokking)
 span_trigger_steps = 500 # Wait at least N steps AFTER WWM activation
 span_window = 100         # Check improvement every N steps
 span_threshold = 0.002    # Trigger if improvement < 0.2%
+span_mask_prob = 0.10     # Percentage of words to mask (seeds) in Phase 3
 span_min_len = 3
 span_max_len = 5
 

@@ -66,11 +66,13 @@ class TrainingConfig:
     wwm_trigger_steps: int = 5000
     wwm_window: int = 2000
     wwm_threshold: float = 0.005
+    wwm_mask_prob: float = 0.15
     
     # Span Masking
     span_trigger_steps: int = 5000
     span_window: int = 2000
     span_threshold: float = 0.005
+    span_mask_prob: float = 0.15
     span_min_len: int = 3
     span_max_len: int = 5
     

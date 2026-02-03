@@ -29,7 +29,7 @@ from .callbacks.manager import CallbackManager
 from .callbacks.grokking import GrokkingDetector, ProcrustesMonitor, ConceptClusteringMonitor
 from ..models.multi_task_wrapper import MultiTaskLlama
 from ..evaluation.procedural_evaluator import ProceduralEvaluator
-from ..utils.logger import ArbiterLogger
+from ..utils.logger import ArbiterLogger, enable_windows_ansi
 
 class GenesisTrainer:
     """
@@ -43,8 +43,10 @@ class GenesisTrainer:
         tokenizer,
         train_loader,
         config: TrainingConfig,
-        val_loader=None
+        val_loader=None,
+        boundary_tensor: Optional[torch.Tensor] = None
     ):
+        enable_windows_ansi() # Ensure fast console updates work on Windows
         self.model = model
         self.tokenizer = tokenizer
         self.train_loader = train_loader
@@ -150,20 +152,14 @@ class GenesisTrainer:
         self.smoothed_s_per_step = None
         self.vram_warned = False
         
-        # Load Boundary Map if available
-        try:
-            boundary_path = Path("data/genesis_boundaries.pt")
-            if boundary_path.exists():
-                self.boundary_tensor = torch.load(boundary_path, map_location='cpu')
-                # Inject into loader if it's InfiniteGPULoader
-                if hasattr(self.train_loader, 'loader'):
-                    self.train_loader.loader.boundary_tensor = self.boundary_tensor.to(self.device)
-                print(f"  [DATA] Whole-Word Masking map loaded: {len(self.boundary_tensor)} nodes")
-            else:
-                self.boundary_tensor = None
-        except Exception as e:
-            print(f"  [WARN] Could not load boundary map: {e}")
-            self.boundary_tensor = None
+        # Boundary Map
+        self.boundary_tensor = boundary_tensor
+        self.wwm_loaded = self.boundary_tensor is not None
+        
+        # Inject into loader if it's InfiniteGPULoader and wasn't set
+        if self.boundary_tensor is not None and hasattr(self.train_loader, 'loader'):
+            if getattr(self.train_loader.loader, 'boundary_tensor', None) is None:
+                self.train_loader.loader.boundary_tensor = self.boundary_tensor.to(self.device)
             
         # Performance Tracking
         self.interval_tokens = 0
@@ -179,7 +175,7 @@ class GenesisTrainer:
         
         # Display model info on init if requested or standard
         self.is_compiled = config.compile_model
-        self.wwm_loaded = self.boundary_tensor is not None
+        # self.wwm_loaded already set above
         self._print_startup_banner()
         
         # Session Logging
@@ -206,9 +202,9 @@ class GenesisTrainer:
         param_bytes = 4 if self.config.precision == "fp32" else 2
         model_size_mb = total_params * param_bytes / (1024**2)
         
-        print("="*70)
+        print("="*65)
         print(f"  G E N E S I S   A R B I T E R   |   T R A I N I N G   D A S H B O A R D")
-        print("="*70)
+        print("="*65)
         
         # System Segment
         print(f" [SYSTEM] Device: {gpu_name} (CUDA {cuda_ver})")
@@ -231,19 +227,19 @@ class GenesisTrainer:
         print(f" [SYSTEM] Span Masking: {span_status}")
         
         # Model Segment
-        print("-" * 70)
+        print("-" * 65)
         print(f" [MODEL]  Layers: {getattr(self.model.base, 'n_layers', 0)} | Dim: {getattr(self.model.base, 'dim', 0)} | Heads: {getattr(self.model.base, 'n_heads', 0)}")
         print(f" [MODEL]  Params: {total_params/1e6:.2f}M ({trainable_params/1e6:.2f}M trainable) | Vocab: {getattr(self.model, 'vocab_size', 0)}")
         print(f" [MODEL]  Est. VRAM Weights: {model_size_mb:.2f} MB")
         
         # Training Segment
-        print("-" * 70)
+        print("-" * 65)
         print(f" [TRAIN]  Steps: {self.config.max_steps} | Batch: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
         print(f" [TRAIN]  SeqLen: {self.config.max_seq_len} | LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
         
         # Research Segment
         if self.wwm_active or self.span_active:
-            print("-" * 70)
+            print("-" * 65)
             if self.span_active:
                 print(f" [RESEARCH] Phase 2 (WWM): Final Improv: {self.wwm_final_improvement:.2f}%")
                 print(f" [RESEARCH] Phase 3 (Span): Current Improv: {self.span_improvement:.2f}%")
@@ -253,10 +249,10 @@ class GenesisTrainer:
                     wwm_imp = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
                 print(f" [RESEARCH] Phase 2 (WWM): Current Improv: {wwm_imp:.2f}%")
         
-        print("="*70 + "\n")
+        print("="*65 + "\n")
 
     def _refresh_console(self, current_info=None):
-        """Clear console and reprint banner + current info."""
+        """Clear console and reprint banner + current info (Stable)."""
         os.system('cls' if os.name == 'nt' else 'clear')
         self._print_startup_banner()
         if current_info:
@@ -359,13 +355,16 @@ class GenesisTrainer:
                         print("  [SYSTEM] CUDA Graph captured successfully.")
                         curr_loss = self.static_loss.item()
                     else:
-                        # Standard Eager Step
-                        step_loss_sum = 0.0
+                        # Standard Eager Step - ACCUMULATE ON GPU
+                        accum_loss = torch.tensor(0.0, device=self.device)
                         for _ in range(self.config.grad_accum_steps):
                             try: batch = next(data_iter)
                             except StopIteration: batch = next(iter(self.train_loader))
-                            step_loss_sum += self._train_step(batch['tokens'], batch['labels']).item()
-                        curr_loss = step_loss_sum
+                            # We pass the sum to keep track without syncing yet
+                            accum_loss += self._train_step(batch['tokens'], batch['labels'])
+                        
+                        # SINGLE SYNC POINT PER FULL STEP
+                        curr_loss = accum_loss.item()
                     
                     lr = self.scheduler.step(self.global_step)
                 
@@ -434,12 +433,12 @@ class GenesisTrainer:
                                         step=self.global_step,
                                         signal_type="wwm_activation",
                                         value=1.0,
-                                        description="Dynamic Whole-Word Masking activated via loss plateau."
+                                        description=f"Dynamic Whole-Word Masking activated (Prob: {self.config.wwm_mask_prob})."
                                     )
                                     self.logger.log_metrics({"Research/WWM_Active": 1.0}, self.global_step)
                                     
                                     if hasattr(self.train_loader, 'loader'):
-                                        self.train_loader.loader.mask_prob = 0.15
+                                        self.train_loader.loader.mask_prob = self.config.wwm_mask_prob
                                         self.train_loader.loader.use_wwm = True
                                 
                                 self.last_ema_check = self.global_step
@@ -471,14 +470,15 @@ class GenesisTrainer:
                                         step=self.global_step,
                                         signal_type="span_activation",
                                         value=1.0,
-                                        description=f"Phase 3 Word Sequence (Span) Masking activated (Len: {self.config.span_min_len}-{self.config.span_max_len})."
+                                        description=f"Phase 3 Word Sequence (Span) Masking activated (Prob: {self.config.span_mask_prob}, Len: {self.config.span_min_len}-{self.config.span_max_len})."
                                     )
                                     self.logger.log_metrics({"Research/Span_Active": 1.0}, self.global_step)
                                     
                                     if hasattr(self.train_loader, 'loader'):
+                                        self.train_loader.loader.mask_prob = self.config.span_mask_prob
                                         self.train_loader.loader.use_span = True
                                         self.train_loader.loader.span_range = (self.config.span_min_len, self.config.span_max_len)
-                                        # m_prob remains 0.15 but now covers random spans per batch
+                                        # m_prob set from config
                                 
                                 self.last_ema_check = self.global_step
                                 self.ema_at_last_check = self.loss_ema
@@ -519,13 +519,15 @@ class GenesisTrainer:
                 # --- Asynchronous Statistics Update ---
                 if self.stats_queue.empty():
                     try:
-                        # Snapshot data for the background thread (NumPy math)
+                        # Optimization: Use the analytics objects internal deque directly
+                        # instead of list() which performs a full copy.
+                        # calculate_from_data is already static and thread-safe.
                         snapshot = {
-                            "y": np.array(list(self.analytics.loss_buffer)),
+                            "y": np.array(self.analytics.loss_buffer), # NumPy can handle deque directly
                             "ema_100": self.analytics.ema_100,
                             "global_min": self.analytics.global_min,
                             "stagnation_steps": self.analytics.stagnation_steps,
-                            "spikes": list(self.analytics.spikes),
+                            "spikes": list(self.analytics.spikes), # Spikes are usually few, list is okay
                             "total_steps": self.analytics.total_steps,
                             "window_size": self.analytics.window_size,
                             "step": self.global_step,

@@ -24,6 +24,15 @@ from datetime import datetime
 from contextlib import contextmanager
 import threading
 import hashlib
+import ctypes
+import os
+
+def enable_windows_ansi():
+    """Enable Virtual Terminal Processing for Windows console."""
+    if os.name == 'nt':
+        kernel32 = ctypes.windll.kernel32
+        # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x4
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
 
 try:
     from torch.utils.tensorboard import SummaryWriter

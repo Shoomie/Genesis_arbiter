@@ -85,13 +85,16 @@ class InfiniteGPULoader:
                 
                 # Each word gets a random value.
                 word_rand = torch.rand(self.batch_size, self.max_seq_len + 1, device=self.device)
-                word_mask = word_rand < m_prob
                 
                 # Optional Phase 3: Span Masking (Word Dilation)
                 if self.use_span:
                     min_s, max_s = self.span_range
                     # Sample a span length for this specific batch
                     current_span = int(torch.randint(min_s, max_s + 1, (1,)).item()) if min_s < max_s else min_s
+                    
+                    # Normalize probability so total density matches m_prob (Intuitive Density)
+                    seed_prob = m_prob / max(current_span, 1)
+                    word_mask = word_rand < seed_prob
                     
                     if current_span > 1:
                         # Simple dilation: if a word is masked, mask the next N-1 words too.
@@ -102,6 +105,9 @@ class InfiniteGPULoader:
                             shifted[:, s:] = word_mask[:, :-s]
                             combined = combined | shifted
                         word_mask = combined
+                else:
+                    # Phase 2: Standard Whole-Word Masking (1:1 Density)
+                    word_mask = word_rand < m_prob
 
                 # Distribute random values / masks to tokens based on word_ids
                 mask = torch.gather(word_mask, 1, word_ids)

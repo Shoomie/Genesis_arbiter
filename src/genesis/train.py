@@ -67,6 +67,8 @@ def load_global_config_into_training_config(args) -> Tuple[TrainingConfig, Model
     if args.wwm_trigger: train_config.wwm_trigger_steps = args.wwm_trigger
     if args.wwm_window: train_config.wwm_window = args.wwm_window
     if args.wwm_threshold: train_config.wwm_threshold = args.wwm_threshold
+    if args.wwm_prob: train_config.wwm_mask_prob = args.wwm_prob
+    if args.span_prob: train_config.span_mask_prob = args.span_prob
     
     # --- Model Resolution ---
     # Start with standard fallback
@@ -136,6 +138,8 @@ def main():
     parser.add_argument("--wwm-trigger", type=int, help="Steps to wait before checking for plateau")
     parser.add_argument("--wwm-window", type=int, help="Window size for loss comparison")
     parser.add_argument("--wwm-threshold", type=float, help="Improvement threshold (0.005 = 0.5%%)")
+    parser.add_argument("--wwm-prob", type=float, help="Mask probability for WWM")
+    parser.add_argument("--span-prob", type=float, help="Mask probability for Span Masking")
     
     args = parser.parse_args()
     
@@ -169,6 +173,14 @@ def main():
             'lm': 0.70, 'coherence': 0.15, 'cross_ref': 0.075, 'paraphrase': 0.075
         }
         
+        # Try to load WWM boundary map early
+        project_root = Path(__file__).parents[2]
+        boundary_path = project_root / "data" / "genesis_boundaries.pt"
+        boundary_tensor = None
+        if boundary_path.exists():
+            print(f"  [DATA] Loading WWM boundary map...")
+            boundary_tensor = torch.load(boundary_path, map_location='cpu')
+        
         # Initialize GPU-Resident Loader
         from genesis.datasets.byte_loader import InfiniteGPULoader, BackgroundPrefetcher
         raw_loader = InfiniteGPULoader(
@@ -178,7 +190,8 @@ def main():
             batch_size=train_config.batch_size,
             max_seq_len=train_config.max_seq_len,
             task_distribution=task_dist,
-            device=torch.device(train_config.device)
+            device=torch.device(train_config.device),
+            boundary_tensor=boundary_tensor
         )
         train_loader = BackgroundPrefetcher(raw_loader)
         
@@ -202,7 +215,8 @@ def main():
         model=model,
         tokenizer=tokenizer,
         train_loader=train_loader,
-        config=train_config
+        config=train_config,
+        boundary_tensor=boundary_tensor
     )
     
     # Resume?
