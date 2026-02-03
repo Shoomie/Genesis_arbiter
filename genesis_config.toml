@@ -10,10 +10,10 @@ device = "cuda"
 
 # Generation Control
 max_tokens = 200
-temperature = 0
+temperature = 0.7
 top_k = 40
 top_p = 0.9
-repetition_penalty = 1.3
+repetition_penalty = 1
 
 # UX Settings
 stream_output = true
@@ -25,11 +25,15 @@ stop_sequences = ["\n\n\n"]
 mode = "microscope"
 
 # Optimization Parameters
-learning_rate = 5e-5
+learning_rate = 3e-5
 weight_decay = 0.01
 max_steps = 10000
 batch_size = 8
-grad_accum_steps = 8
+grad_accum_steps = 4
+
+# Automated Plateau Recovery (Suggestion 3)
+plateau_lr_drop = 0.5     # Drop LR by 50% on plateau
+plateau_lr_patience = 1000 # Wait N steps of stagnation before dropping
 lr_schedule = "cosine"
 warmup_steps = 100
 min_lr_ratio = 0.05
@@ -42,14 +46,16 @@ autoresume_best = true
 # Dynamic WWM Trigger (Semantic Grokking)
 wwm_trigger_steps = 500  # Initial steps to wait
 wwm_window = 100         # Check improvement every N steps
-wwm_threshold = 0.005     # Trigger if improvement < 0.5%
+wwm_threshold = 0.02    # Trigger if improvement < 2.0%
 wwm_mask_prob = 0.15      # Percentage of words to mask in Phase 2
+wwm_ramp_steps = 1000     # Linearly ramp from 5% to 15% over N steps
 
 # Phase 3: Span Masking (Structural Grokking)
-span_trigger_steps = 500 # Wait at least N steps AFTER WWM activation
+span_trigger_steps = 1000 # Wait N steps after WWM triggers
 span_window = 100         # Check improvement every N steps
-span_threshold = 0.002    # Trigger if improvement < 0.2%
-span_mask_prob = 0.10     # Percentage of words to mask (seeds) in Phase 3
+span_threshold = 0.01    # Trigger if improvement < 1.0%
+span_mask_prob = 0.10     # Percentage of words to mask in Phase 3
+span_ramp_steps = 500     # Linearly ramp to final density over N steps
 span_min_len = 3
 span_max_len = 5
 
@@ -57,7 +63,7 @@ span_max_len = 5
 # Default architecture (if not using a preset mode)
 vocab_size = "auto"
 dim = 192
-n_layers = 12
+n_layers = 16
 n_heads = 6
 intermediate_size = 768
 norm_type = "deepnorm"

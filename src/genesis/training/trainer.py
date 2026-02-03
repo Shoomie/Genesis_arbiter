@@ -137,6 +137,12 @@ class GenesisTrainer:
         self.span_active = False
         self.span_activated_step = None
         
+        self.lr_stun_executed = False # Track if automated stun happened
+        
+        # Plateau Detection State (Persisted)
+        self.last_ema_check = None
+        self.ema_at_last_check = None
+        
         # Research Performance Tracking
         self.ema_at_wwm = None
         self.ema_at_span = None
@@ -144,6 +150,8 @@ class GenesisTrainer:
         self.span_improvement = 0.0
         
         self.analytics = LossAnalytics(window_size=100)
+        self.wwm_analytics = LossAnalytics(window_size=100)
+        self.span_analytics = LossAnalytics(window_size=100)
         
         # Buffers & Stats
         self.static_loss = torch.tensor(0.0, device=self.device)
@@ -234,8 +242,15 @@ class GenesisTrainer:
         
         # Training Segment
         print("-" * 65)
+        total_tokens = 0
+        if hasattr(self.train_loader, 'loader'):
+            total_tokens = len(self.train_loader.loader.data_tensor)
+        elif hasattr(self.train_loader, 'data_tensor'):
+            total_tokens = len(self.train_loader.data_tensor)
+        token_str = f"{total_tokens/1e6:.2f}M" if total_tokens >= 1e6 else f"{total_tokens/1e3:.1f}K"
+        
         print(f" [TRAIN]  Steps: {self.config.max_steps} | Batch: {self.config.batch_size} (Accum: {self.config.grad_accum_steps})")
-        print(f" [TRAIN]  SeqLen: {self.config.max_seq_len} | LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
+        print(f" [TRAIN]  SeqLen: {self.config.max_seq_len} | Tokens: {token_str} | LR: {self.config.learning_rate:.2e} | WD: {self.config.weight_decay:.2e}")
         
         # Research Segment
         if self.wwm_active or self.span_active:
@@ -270,14 +285,34 @@ class GenesisTrainer:
                 data = self.stats_queue.get(timeout=1.0)
                 if data is None: break
                 
-                # Use the static method for thread-safe calculation
-                stats = self.analytics.calculate_from_data(data, data['progress'])
+                step = data['step']
+                progress = data['progress']
                 
-                if stats:
-                    display = f"\n--- LOSS DYNAMICS (Step {data['step']}) ---\n"
-                    display += json.dumps(stats, indent=2)
-                    display += "\n" + "-" * 40
-                    self.last_stats_display = display
+                output_sections = []
+                
+                # 1. Lifetime Stats
+                stats_life = LossAnalytics.calculate_from_data(data['lifetime'], progress)
+                if stats_life:
+                    sec = f"\n--- LOSS DYNAMICS: LIFETIME (Step {step}) ---\n"
+                    sec += json.dumps(stats_life, indent=2)
+                    output_sections.append(sec)
+                
+                # 2. Phase 2 Stats (only if active)
+                if data['wwm'] and data['wwm']['total_steps'] > 5:
+                    stats_wwm = LossAnalytics.calculate_from_data(data['wwm'], progress)
+                    sec = f"\n--- LOSS DYNAMICS: PHASE 2 (WWM) ---\n"
+                    sec += json.dumps(stats_wwm, indent=2)
+                    output_sections.append(sec)
+                    
+                # 3. Phase 3 Stats (only if active)
+                if data['span'] and data['span']['total_steps'] > 5:
+                    stats_span = LossAnalytics.calculate_from_data(data['span'], progress)
+                    sec = f"\n--- LOSS DYNAMICS: PHASE 3 (SPAN) ---\n"
+                    sec += json.dumps(stats_span, indent=2)
+                    output_sections.append(sec)
+
+                if output_sections:
+                    self.last_stats_display = "\n".join(output_sections) + "\n" + "-" * 40
                 
                 self.stats_queue.task_done()
             except queue.Empty:
@@ -318,7 +353,30 @@ class GenesisTrainer:
         try:
             while self.global_step < self.config.max_steps:
                 step_start = time.time()
-                
+               # --- Suggestion 3: Automated LR Stun (Stagnation Break) ---
+                if not self.lr_stun_executed and self.analytics.stagnation_steps >= self.config.plateau_lr_patience:
+                    print(f"\n  [DYNAMIC] Automated LR Stun: Stagnation reached {self.config.plateau_lr_patience} steps.")
+                    old_lr = self.optimizer.param_groups[0]['lr']
+                    new_lr = old_lr * self.config.plateau_lr_drop
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = new_lr
+                    self.lr_stun_executed = True
+                    print(f"  [DYNAMIC] Scaling Learning Rate: {old_lr:.2e} -> {new_lr:.2e}")
+                    self.logger.log_grokking_signal(self.global_step, "lr_stun", self.config.plateau_lr_drop, f"Plateau recovery triggered at step {self.global_step}")
+
+                # --- Suggestion 4: Ramped Masking Progression ---
+                if self.wwm_active or self.span_active:
+                    loader = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+                    if self.span_active:
+                        steps_into_phase = self.global_step - self.span_activated_step
+                        ramp = min(steps_into_phase / max(self.config.span_ramp_steps, 1), 1.0)
+                        loader.mask_prob = 0.05 + (self.config.span_mask_prob - 0.05) * ramp
+                    elif self.wwm_active:
+                        steps_into_phase = self.global_step - self.wwm_activated_step
+                        ramp = min(steps_into_phase / max(self.config.wwm_ramp_steps, 1), 1.0)
+                        loader.mask_prob = 0.05 + (self.config.wwm_mask_prob - 0.05) * ramp
+
+                # 2. Forward and Backward
                 if self.config.use_cuda_graph and self.cuda_graph is not None:
                     # REPLAY MODE
                     try: batch = next(data_iter)
@@ -377,8 +435,24 @@ class GenesisTrainer:
                 self.interval_tokens += tokens_this_step
                 # ------------------------------
 
+                # 3. Step Administrative
                 self.global_step += 1
                 
+                # High-Resolution EMA (Per-step update for smooth triggering)
+                if self.loss_ema is None:
+                    self.loss_ema = curr_loss
+                else:
+                    # Use a very slow alpha (0.99) for per-step EMA to act as a noise filter
+                    # This is roughly equivalent to a 100-step average but updated live
+                    self.loss_ema = 0.99 * self.loss_ema + 0.01 * curr_loss
+                
+                # Analytics Updates
+                self.analytics.update(curr_loss)
+                if self.wwm_active and not self.span_active:
+                    self.wwm_analytics.update(curr_loss)
+                if self.span_active:
+                    self.span_analytics.update(curr_loss)
+
                 # Buffer log for session file
                 self.session_log.append({
                     "step": self.global_step,
@@ -411,13 +485,8 @@ class GenesisTrainer:
                     self._refresh_console(log_line)
                     
                     # --- Plateau Detection (Dynamic WWM Trigger) ---
-                    if self.loss_ema is None:
-                        self.loss_ema = curr_loss
-                    else:
-                        self.loss_ema = 0.95 * self.loss_ema + 0.05 * curr_loss
-                    
                     if not self.wwm_active and self.global_step > self.config.wwm_trigger_steps and self.boundary_tensor is not None:
-                        if hasattr(self, 'last_ema_check'):
+                        if self.last_ema_check is not None:
                             steps_since_check = self.global_step - self.last_ema_check
                             if steps_since_check >= self.config.wwm_window:
                                 improvement = (self.ema_at_last_check - self.loss_ema) / max(self.ema_at_last_check, 1e-6)
@@ -440,6 +509,11 @@ class GenesisTrainer:
                                     if hasattr(self.train_loader, 'loader'):
                                         self.train_loader.loader.mask_prob = self.config.wwm_mask_prob
                                         self.train_loader.loader.use_wwm = True
+                                        
+                                    # Precision Refinement: Purge queue and reset phase analytics
+                                    if hasattr(self.train_loader, 'clear'):
+                                        self.train_loader.clear()
+                                    self.wwm_analytics = LossAnalytics(window_size=100)
                                 
                                 self.last_ema_check = self.global_step
                                 self.ema_at_last_check = self.loss_ema
@@ -449,7 +523,7 @@ class GenesisTrainer:
                             
                     # --- Phase 3: Span Masking Trigger (Contiguous Grokking) ---
                     elif not self.span_active and self.wwm_active and (self.global_step - self.wwm_activated_step) > self.config.span_trigger_steps:
-                        if hasattr(self, 'last_ema_check'):
+                        if self.last_ema_check is not None:
                             steps_since_check = self.global_step - self.last_ema_check
                             if steps_since_check >= self.config.span_window:
                                 improvement = (self.ema_at_last_check - self.loss_ema) / max(self.ema_at_last_check, 1e-6)
@@ -479,6 +553,11 @@ class GenesisTrainer:
                                         self.train_loader.loader.use_span = True
                                         self.train_loader.loader.span_range = (self.config.span_min_len, self.config.span_max_len)
                                         # m_prob set from config
+                                        
+                                    # Precision Refinement: Purge queue and reset phase analytics
+                                    if hasattr(self.train_loader, 'clear'):
+                                        self.train_loader.clear()
+                                    self.span_analytics = LossAnalytics(window_size=100)
                                 
                                 self.last_ema_check = self.global_step
                                 self.ema_at_last_check = self.loss_ema
@@ -519,19 +598,25 @@ class GenesisTrainer:
                 # --- Asynchronous Statistics Update ---
                 if self.stats_queue.empty():
                     try:
-                        # Optimization: Use the analytics objects internal deque directly
-                        # instead of list() which performs a full copy.
-                        # calculate_from_data is already static and thread-safe.
+                        progress = (self.global_step / self.config.max_steps) * 100
+                        
+                        def get_snap(an):
+                            return {
+                                "y": np.array(an.loss_buffer),
+                                "ema_100": an.ema_100,
+                                "global_min": an.global_min,
+                                "stagnation_steps": an.stagnation_steps,
+                                "spikes": list(an.spikes),
+                                "total_steps": an.total_steps,
+                                "window_size": an.window_size
+                            }
+
                         snapshot = {
-                            "y": np.array(self.analytics.loss_buffer), # NumPy can handle deque directly
-                            "ema_100": self.analytics.ema_100,
-                            "global_min": self.analytics.global_min,
-                            "stagnation_steps": self.analytics.stagnation_steps,
-                            "spikes": list(self.analytics.spikes), # Spikes are usually few, list is okay
-                            "total_steps": self.analytics.total_steps,
-                            "window_size": self.analytics.window_size,
                             "step": self.global_step,
-                            "progress": (self.global_step / self.config.max_steps) * 100
+                            "progress": progress,
+                            "lifetime": get_snap(self.analytics),
+                            "wwm": get_snap(self.wwm_analytics) if self.wwm_active else None,
+                            "span": get_snap(self.span_analytics) if self.span_active else None
                         }
                         self.stats_queue.put_nowait(snapshot)
                     except (queue.Full, RuntimeError):
@@ -567,34 +652,60 @@ class GenesisTrainer:
             sys.exit(0)
             
     def validate(self):
-        """Run validation loop."""
+        """Run validation loop with per-language diagnostics."""
         self.model.eval()
-        total_loss = 0
-        steps = 0
         
-        print("\nRunning Validation...")
+        # Get locale map from the actual loader (through the prefixer)
+        loader = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+        locale_map = getattr(loader, 'locale_map', {})
+        
+        print("\n" + "-"*30)
+        print(f"  V A L I D A T I O N   (Step {self.global_step})")
+        print("-"*30)
+        
+        all_metrics = {}
+        total_val_loss = 0
+        total_langs = 0
+        
         with torch.no_grad():
-            for batch in self.val_loader:
-                if steps >= 50: break # Partial validation for speed
-                
-                # Move all tensors in batch to device
+            # 1. Global Performance (Mixed)
+            val_steps = 30 # Reduced for total latency
+            for i in range(val_steps):
+                batch = next(iter(self.val_loader)) if self.val_loader else None
+                if not batch: break
                 for k, v in batch.items():
-                    if isinstance(v, torch.Tensor):
-                        batch[k] = v.to(self.device, non_blocking=True)
-                
+                    if isinstance(v, torch.Tensor): batch[k] = v.to(self.device, non_blocking=True)
                 with autocast(device_type=self.device.type, dtype=self._get_dtype()):
-                    outputs, loss, task_name = self.model(batch)
-                
-                total_loss += loss.item()
-                steps += 1
-                
-        avg_loss = total_loss / steps
-        print(f"Validation Loss: {avg_loss:.4f}\n")
-        self.logger.log_evaluation(
-            step=self.global_step,
-            val_perplexity=avg_loss
-        )
-        
+                    _, loss, _ = self.model(batch)
+                total_val_loss += loss.item()
+            
+            avg_loss = total_val_loss / val_steps
+            print(f"  [GLOBAL] Avg Val Loss: {avg_loss:.4f}")
+            self.logger.log_evaluation(step=self.global_step, val_perplexity=avg_loss)
+            
+            # 2. Per-Language targeted evaluation
+            if locale_map:
+                print("  [LANGS] Individual Perplexity:")
+                for lang in locale_map:
+                    lang_total = 0
+                    l_steps = 10
+                    
+                    # Direct access to loader since Prefetcher doesn't have sample_locale
+                    loader_obj = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+                    if not hasattr(loader_obj, 'sample_locale'): break
+                    
+                    for _ in range(l_steps):
+                        batch = loader_obj.sample_locale(lang)
+                        if batch is None: break
+                        with autocast(device_type=self.device.type, dtype=self._get_dtype()):
+                            _, loss, _ = self.model(batch)
+                        lang_total += loss.item()
+                    
+                    if l_steps > 0:
+                        l_avg = lang_total / l_steps
+                        print(f"    - {lang:5}: {l_avg:.4f}")
+                        self.logger.log_metrics({f"Eval/Perplexity_{lang}": l_avg}, self.global_step)
+
         self.model.train()
         
     def evaluate_extensive(self):
@@ -627,7 +738,26 @@ class GenesisTrainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scaler_state_dict': self.scaler.state_dict(),
             'config': asdict(self.config),
-            'step': self.global_step
+            'step': self.global_step,
+            # Research State Persistence
+            'research_state': {
+                'wwm_active': self.wwm_active,
+                'wwm_activated_step': self.wwm_activated_step,
+                'span_active': self.span_active,
+                'span_activated_step': self.span_activated_step,
+                'loss_ema': self.loss_ema,
+                'last_ema_check': self.last_ema_check,
+                'ema_at_last_check': self.ema_at_last_check,
+                'ema_at_wwm': self.ema_at_wwm,
+                'ema_at_span': self.ema_at_span,
+                'wwm_final_improvement': self.wwm_final_improvement,
+                'span_improvement': self.span_improvement,
+                'lr_stun_executed': self.lr_stun_executed,
+                # Analytics Persistence
+                'analytics_state': self.analytics.to_dict(),
+                'wwm_analytics_state': self.wwm_analytics.to_dict(),
+                'span_analytics_state': self.span_analytics.to_dict()
+            }
         }
         
         # Add model architecture if available
@@ -670,6 +800,48 @@ class GenesisTrainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
         self.global_step = checkpoint['step']
+        
+        # Restore Research State
+        if 'research_state' in checkpoint:
+            rs = checkpoint['research_state']
+            self.wwm_active = rs.get('wwm_active', False)
+            self.wwm_activated_step = rs.get('wwm_activated_step')
+            self.span_active = rs.get('span_active', False)
+            self.span_activated_step = rs.get('span_activated_step')
+            self.loss_ema = rs.get('loss_ema')
+            self.last_ema_check = rs.get('last_ema_check')
+            self.ema_at_last_check = rs.get('ema_at_last_check')
+            self.ema_at_wwm = rs.get('ema_at_wwm')
+            self.ema_at_span = rs.get('ema_at_span')
+            self.wwm_final_improvement = rs.get('wwm_final_improvement', 0.0)
+            self.span_improvement = rs.get('span_improvement', 0.0)
+            self.lr_stun_executed = rs.get('lr_stun_executed', False)
+            
+            # Restore Analytics History
+            if 'analytics_state' in rs:
+                self.analytics.from_dict(rs['analytics_state'])
+            if 'wwm_analytics_state' in rs:
+                self.wwm_analytics.from_dict(rs['wwm_analytics_state'])
+            if 'span_analytics_state' in rs:
+                self.span_analytics.from_dict(rs['span_analytics_state'])
+                
+            print(f"  [SYTEM] Research state restored (WWM: {'Active' if self.wwm_active else 'OFF'}, Span: {'Active' if self.span_active else 'OFF'})")
+            
+            # --- Loader Synchronization ---
+            # Ensure the restored masking flags are pushed into the current data loader
+            if hasattr(self.train_loader, 'loader'):
+                loader = self.train_loader.loader
+                if self.span_active:
+                    loader.use_span = True
+                    loader.mask_prob = self.config.span_mask_prob
+                    loader.span_range = (self.config.span_min_len, self.config.span_max_len)
+                elif self.wwm_active:
+                    loader.use_wwm = True
+                    loader.mask_prob = self.config.wwm_mask_prob
+                
+                if self.wwm_active or self.span_active:
+                    print(f"  [DATA] Masking configuration re-injected into GPU Loader.")
+        
         print(f"Resumed from step {self.global_step}")
 
     def _get_dtype(self):

@@ -39,6 +39,26 @@ class LossAnalytics:
             self.spikes.append(raw_loss)
             if len(self.spikes) > 3:
                 self.spikes.pop(0)
+
+    def to_dict(self) -> Dict:
+        """Serialize state for checkpointing."""
+        return {
+            "loss_buffer": list(self.loss_buffer),
+            "ema_100": self.ema_100,
+            "global_min": self.global_min,
+            "stagnation_steps": self.stagnation_steps,
+            "total_steps": self.total_steps,
+            "spikes": self.spikes
+        }
+    
+    def from_dict(self, d: Dict):
+        """Restore state from checkpoint dictionary."""
+        self.loss_buffer = collections.deque(d.get("loss_buffer", []), maxlen=self.window_size)
+        self.ema_100 = d.get("ema_100")
+        self.global_min = d.get("global_min", float('inf'))
+        self.stagnation_steps = d.get("stagnation_steps", 0)
+        self.total_steps = d.get("total_steps", 0)
+        self.spikes = d.get("spikes", [])
                 
     def get_stats(self, progress_pct: float) -> Dict:
         if len(self.loss_buffer) < 2:

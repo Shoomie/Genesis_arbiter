@@ -54,15 +54,16 @@ class InfiniteGPULoader:
         self.use_span = False
         self.span_range = (1, 1) # (min, max)
 
-    def _sample_lm(self, mask_prob: Optional[float] = None, use_wwm: Optional[bool] = None):
+    def _sample_lm(self, mask_prob: Optional[float] = None, use_wwm: Optional[bool] = None, starts: Optional[torch.Tensor] = None):
         """Vectorized sample for Language Modeling with optional Masking."""
         # Use internal state if not provided
         m_prob = mask_prob if mask_prob is not None else self.mask_prob
         u_wwm = use_wwm if use_wwm is not None else self.use_wwm
         
-        # 1. Randomly pick batch_size start points
-        max_start = len(self.data_tensor) - self.max_seq_len - 1
-        starts = torch.randint(0, max_start, (self.batch_size,), device=self.device)
+        # 1. pick batch_size start points (if not provided)
+        if starts is None:
+            max_start = len(self.data_tensor) - self.max_seq_len - 1
+            starts = torch.randint(0, max_start, (self.batch_size,), device=self.device)
         
         # 2. Generate full index matrix [B, L]
         indices = starts.unsqueeze(1) + self.grid
@@ -125,6 +126,28 @@ class InfiniteGPULoader:
         while True:
             yield self._sample_lm()
 
+    def sample_locale(self, locale: str, mask_prob: float = 0.0):
+        """Sample a batch exclusively from a specific locale."""
+        if locale not in self.locale_map:
+            return None
+        
+        # Pick random verses from this locale
+        indices = self.locale_map[locale]
+        if not indices: return None
+        
+        chosen_idx = self.rng.choice(indices, size=self.batch_size)
+        chosen_idx_t = torch.tensor(chosen_idx, device=self.device)
+        
+        # Get start positions (with slight random offset to avoid always starting at verse start)
+        starts = self.verse_starts[chosen_idx_t]
+        v_lens = self.verse_lens[chosen_idx_t]
+        
+        # For validation, we can just use starts, or add jitter
+        # jit = torch.randint(0, (v_lens - self.max_seq_len).clamp(min=1), (self.batch_size,))
+        # but let's just keep it simple for now. 
+        
+        return self._sample_lm(mask_prob=mask_prob, starts=starts)
+
 class BackgroundPrefetcher:
     """
     Overlaps data sampling with model computation using a background thread.
@@ -158,6 +181,15 @@ class BackgroundPrefetcher:
     def __next__(self):
         # Get from queue (blocks if empty)
         return self.queue.get()
+
+    def clear(self):
+        """Purge the current queue to avoid phase leakage."""
+        try:
+            while not self.queue.empty():
+                self.queue.get_nowait()
+            print(f"  [DATA] Prefetcher queue purged.")
+        except Exception:
+            pass
 
     def stop(self):
         self.stop_event.set()

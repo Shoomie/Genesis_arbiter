@@ -45,6 +45,10 @@ class TrainingConfig:
     lr_schedule: str = "cosine"
     min_lr_ratio: float = 0.1
     
+    # Plateau Recovery
+    plateau_lr_drop: float = 0.5
+    plateau_lr_patience: int = 1000
+    
     # System
     precision: str = "bf16"
     compile_model: bool = False
@@ -67,6 +71,7 @@ class TrainingConfig:
     wwm_window: int = 2000
     wwm_threshold: float = 0.005
     wwm_mask_prob: float = 0.15
+    wwm_ramp_steps: int = 1000
     
     # Span Masking
     span_trigger_steps: int = 5000
@@ -75,6 +80,7 @@ class TrainingConfig:
     span_mask_prob: float = 0.15
     span_min_len: int = 3
     span_max_len: int = 5
+    span_ramp_steps: int = 500
     
     # Evaluation
     enable_validation: bool = True
