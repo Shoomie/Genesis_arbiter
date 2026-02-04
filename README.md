@@ -70,7 +70,7 @@ The project uses a unified configuration system:
 ## 📚 Documentation
 
 ### Core Reading
-- **[Theoretical Foundations](docs/research/theoretical_foundations.md)** - Why train on scripture alone?
+- **[Theoretical Foundations](docs/reference/theoretical_foundations.md)** - Why train on scripture alone?
 
 ### Project Resources
 - **[Contributing](project_doc/CONTRIBUTING.md)** - Guidelines for research and code
