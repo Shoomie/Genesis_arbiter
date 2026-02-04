@@ -39,7 +39,7 @@ warmup_steps = 100
 min_lr_ratio = 0.05
 
 # Checkpoint Control
-save_interval = 100
+save_interval = 200
 resume = true
 autoresume_best = true
 
@@ -89,6 +89,7 @@ enable_extensive_eval = false
 val_interval = 750
 log_interval = 10
 eval_interval = 500
+multilingual_log_interval = 25 # Throttle language stats to avoid CPU bottleneck
 
 # Probe depth
 eval_recon_samples = 50
@@ -113,4 +114,3 @@ use_libuv = "0"
 [tasks]
 # Training distribution (sums to 1.0)
 lm = 1.0
-

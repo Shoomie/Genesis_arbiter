@@ -133,6 +133,10 @@ class ArbiterLogger:
         self._grokking_detected = False
         self._val_loss_history: List[float] = []
         
+        # Every-step raw loss history
+        self._raw_loss_history: List[Dict[str, Any]] = []
+        self._history_lock = threading.Lock()
+        
         # Ensure database schema is up-to-date
         self._migrate_database()
     
@@ -349,6 +353,7 @@ class ArbiterLogger:
         """
         exp_config = ExperimentConfig.from_dict(config)
         self.current_run_id = exp_config.run_id
+        self.current_config_hash = exp_config.config_hash
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -392,42 +397,73 @@ class ArbiterLogger:
         wwm_improvement: Optional[float] = None,
         span_improvement: Optional[float] = None,
         tokens_per_sec: Optional[float] = None,
-        gpu_memory_gb: Optional[float] = None
+        gpu_memory_gb: Optional[float] = None,
+        log_to_disk: bool = False
     ):
         """Log training metrics for a single step (Now Async)."""
         if not self.current_run_id:
             raise RuntimeError("Must call start_experiment() before logging")
         
-        # Offload to queue
-        self._queue.put({
-            'type': 'training_step',
-            'data': {
-                'run_id': self.current_run_id,
-                'step': step,
-                'loss': loss,
-                'grad_norm': grad_norm,
-                'learning_rate': learning_rate,
-                'wwm_improvement': wwm_improvement,
-                'span_improvement': span_improvement,
-                'tokens_per_sec': tokens_per_sec,
-                'gpu_memory_gb': gpu_memory_gb,
-                'timestamp': datetime.now().isoformat()
-            }
-        })
+        # Offload to queue (SQLite) - ONLY EXECUTED IF log_to_disk IS TRUE
+        if log_to_disk:
+            self._queue.put({
+                'type': 'training_step',
+                'data': {
+                    'run_id': self.current_run_id,
+                    'step': step,
+                    'loss': loss,
+                    'grad_norm': grad_norm,
+                    'learning_rate': learning_rate,
+                    'wwm_improvement': wwm_improvement,
+                    'span_improvement': span_improvement,
+                    'tokens_per_sec': tokens_per_sec,
+                    'gpu_memory_gb': gpu_memory_gb,
+                    'timestamp': datetime.now().isoformat()
+                }
+            })
+            
+            # TensorBoard logging
+            if self.tensorboard_writer:
+                self.tensorboard_writer.add_scalar('Train/Loss', loss, step)
+                if grad_norm is not None:
+                    self.tensorboard_writer.add_scalar('Train/GradNorm', grad_norm, step)
+                if learning_rate is not None:
+                    self.tensorboard_writer.add_scalar('Train/LearningRate', learning_rate, step)
+                if tokens_per_sec is not None:
+                    self.tensorboard_writer.add_scalar('System/TokensPerSec', tokens_per_sec, step)
+                if span_improvement is not None:
+                    self.tensorboard_writer.add_scalar('Research/Span_Improvement_%', span_improvement, step)
         
-        # TensorBoard logging
-        if self.tensorboard_writer:
-            self.tensorboard_writer.add_scalar('Train/Loss', loss, step)
-            if grad_norm is not None:
-                self.tensorboard_writer.add_scalar('Train/GradNorm', grad_norm, step)
-            if learning_rate is not None:
-                self.tensorboard_writer.add_scalar('Train/LearningRate', learning_rate, step)
-            if tokens_per_sec is not None:
-                self.tensorboard_writer.add_scalar('System/TokensPerSec', tokens_per_sec, step)
-            if wwm_improvement is not None:
-                self.tensorboard_writer.add_scalar('Research/WWM_Improvement_%', wwm_improvement, step)
-            if span_improvement is not None:
-                self.tensorboard_writer.add_scalar('Research/Span_Improvement_%', span_improvement, step)
+        # Buffer for raw export (asynchronous list append is thread-safe)
+        with self._history_lock:
+            self._raw_loss_history.append({
+                "step": step,
+                "loss": loss,
+                "lr": learning_rate,
+                "timestamp": datetime.now().isoformat()
+            })
+
+    def save_loss_history(self) -> str:
+        """Flush the in-memory loss history to a CSV file."""
+        if not self._raw_loss_history:
+            return ""
+            
+        history_dir = self.log_dir / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = int(time.time())
+        file_path = history_dir / f"loss_history_{self.current_run_id}_{timestamp}.csv"
+        
+        try:
+            with open(file_path, 'w') as f:
+                f.write("step,loss,learning_rate,timestamp\n")
+                with self._history_lock:
+                    for entry in self._raw_loss_history:
+                        f.write(f"{entry['step']},{entry['loss']:.6f},{entry['lr']:.2e},{entry['timestamp']}\n")
+            return str(file_path)
+        except Exception as e:
+            print(f"[ArbiterLogger] Failed to save loss history: {e}")
+            return ""
     
     def log_metrics(self, metrics: Dict[str, float], step: int):
         """
@@ -554,17 +590,68 @@ class ArbiterLogger:
                     self.tensorboard_writer.add_scalar(f'Research/EMA_Loss_{lang}', stats['ema'], step)
 
     def get_run_history(self, run_id: str) -> List[Dict[str, Any]]:
-        """Retrieve all training logs for a specific run (for visualization)."""
+        """
+        Retrieve history. If we have a Config Hash (live run), 
+        fetch GLOBAL history for that hash to support resumes.
+        """
+        current_hash = getattr(self, 'current_config_hash', None)
+        
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT step, loss, learning_rate, wwm_improvement, span_improvement 
-                FROM training_logs 
-                WHERE run_id = ? 
-                ORDER BY step ASC
-            """, (run_id,))
-            return [dict(row) for row in cursor.fetchall()]
+            
+            if current_hash:
+                # Fetch ALL runs with this config hash (Ancestry)
+                cursor.execute("""
+                    SELECT t.step, t.loss, t.learning_rate, t.timestamp
+                    FROM training_logs t
+                    JOIN experiments e ON t.run_id = e.run_id
+                    WHERE e.config_hash = ?
+                    ORDER BY t.step ASC, t.timestamp DESC
+                """, (current_hash,))
+                
+                rows = cursor.fetchall()
+                
+                # Deduplicate steps (Keep latest timestamp for each step)
+                history = {}
+                for row in rows:
+                    history[row['step']] = dict(row)
+                
+                # Convert back to sorted list
+                sorted_steps = sorted(history.keys())
+                full_history = [history[s] for s in sorted_steps]
+                
+                # Merge with current RAM buffer (if any not yet flushed)
+                # (RAM buffer is 'latest', so it matches the dedupe logic naturally)
+                # But to avoid complexity, we can trust the DB + periodic flushes? 
+                # Actually, `get_run_history` is called by Visualizer every 2s. 
+                # If we rely ONLY on DB, we miss the last ~100 steps in buffer.
+                # So we must merge.
+                
+                with self._history_lock:
+                    ram_data = self._raw_loss_history
+                    for item in ram_data:
+                        step_id = item['step']
+                        full_history.append(item) 
+                        # Note: Simple append allows duplicates in graph for a second, 
+                        # but dedupe happens on next DB flush/fetch.
+                        # Ideally, we update the dict:
+                        # history[step_id] = item 
+                        # But `full_history` is list.
+                
+                # Re-dedupe specifically for the graph
+                final_map = {item['step']: item for item in full_history}
+                return [final_map[k] for k in sorted(final_map.keys())]
+
+            else:
+                # Fallback: Just fetch this run ID
+                cursor.execute("""
+                    SELECT step, loss, learning_rate, wwm_improvement, span_improvement 
+                    FROM training_logs 
+                    WHERE run_id = ? 
+                    ORDER BY step ASC
+                """, (run_id,))
+                return [dict(row) for row in cursor.fetchall()]
 
     def get_grokking_signals(self, run_id: str) -> List[Dict[str, Any]]:
         """Retrieve all grokking/phase signals for a specific run."""

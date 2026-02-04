@@ -60,16 +60,17 @@ class MultiTaskLlama(nn.Module):
         if hasattr(base_model, 'output'):
             base_model.output.weight = base_model.tok_embeddings.weight
     
-    def forward_lm(self, tokens: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward_lm(self, tokens: torch.Tensor, labels: torch.Tensor, reduction: str = 'mean') -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for language modeling task.
         
         Args:
             tokens: Input token IDs, shape (batch, seq_len)
             labels: Target token IDs, shape (batch, seq_len)
+            reduction: 'mean' (scalar) or 'none' (per-sample [batch])
         
         Returns:
-            (logits, loss)
+            (loss, logits)
         """
         # Get hidden states from base model
         h, _ = self.base(tokens, return_hiddens=True)  # Shape: (batch, seq_len, dim)
@@ -78,20 +79,37 @@ class MultiTaskLlama(nn.Module):
         logits = self.lm_head(h)  # Shape: (batch, seq_len, vocab_size)
         
         # Compute cross-entropy loss
-        loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            labels.view(-1),
-            ignore_index=-100  # Ignore padding tokens
-        )
+        if reduction == 'mean':
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100
+            )
+        else:
+            # Per-token loss
+            raw_loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100,
+                reduction='none'
+            )
+            # Reshape to [batch, seq_len]
+            B, L = tokens.shape
+            raw_loss = raw_loss.view(B, L)
+            
+            # Mask out ignored tokens for averaging
+            mask = (labels != -100).float()
+            # Mean per sequence
+            loss = (raw_loss * mask).sum(dim=1) / (mask.sum(dim=1) + 1e-8)
         
         return loss, logits
     
     
-    def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    def forward(self, batch: Dict[str, torch.Tensor], reduction: str = 'mean') -> Tuple[torch.Tensor, torch.Tensor, str]:
         """
         Simplified forward pass for single-task LM.
         """
-        loss, outputs = self.forward_lm(batch['tokens'], batch['labels'])
+        loss, outputs = self.forward_lm(batch['tokens'], batch['labels'], reduction=reduction)
         return outputs, loss, 'lm'
     
     def get_num_params(self) -> int:

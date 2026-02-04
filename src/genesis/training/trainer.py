@@ -149,6 +149,17 @@ class GenesisTrainer:
         
         # Interactive Dashboard
         self.visualizer = GenesisVisualizer(self.logger, self.logger.current_run_id)
+        
+        # Set Static Metadata
+        total_params = sum(p.numel() for p in self.model.parameters())
+        self.visualizer.set_metadata({
+            "layers": getattr(self.model.base, 'n_layers', 0),
+            "dim": getattr(self.model.base, 'dim', 0),
+            "heads": getattr(self.model.base, 'n_heads', 0),
+            "params": f"{total_params/1e6:.1f}M",
+            "vocab": getattr(self.model, 'vocab_size', 0)
+        })
+        
         self.visualizer.start()
         
         # Plateau Detection State (Persisted)
@@ -207,9 +218,146 @@ class GenesisTrainer:
         self.stats_stop_event = threading.Event()
         self.stats_thread = threading.Thread(target=self._stats_worker_loop, daemon=True)
         self.stats_thread.start()
+        
+        # Async Telemetry Engine (High-Freq, Non-Blocking)
+        self.telemetry_queue = queue.Queue()
+        self.telemetry_stop_event = threading.Event()
+        self.telemetry_thread = threading.Thread(target=self._telemetry_worker_loop, daemon=True)
+        self.telemetry_thread.start()
+
+    def _telemetry_worker_loop(self):
+        """Background worker to handle all telemetry I/O and formatting off the critical path."""
+        import time
+        last_dprint = 0.0
+        last_gpu_check = 0.0
+        gpu_mem_gb = 0.0
+        
+        while not self.telemetry_stop_event.is_set():
+            try:
+                # Block with timeout to check stop event periodically
+                item = self.telemetry_queue.get(timeout=1.0)
+                if item is None: break
+                
+                # Unpack raw data
+                step = item['step']
+                loss = item['loss']
+                lr = item['lr']
+                inst_tps = item['inst_tps']
+                wwm_imp = item['wwm_imp']
+                span_imp = item['span_imp']
+                phase = item['phase']
+                lang_stats = item['lang_stats']
+                loss_ema = item['loss_ema']
+                console_data = item.get('console_data')
+
+                now = time.time()
+                
+                # 1. Heavy GPU Query (Throttled to 2Hz to prevent driver contention)
+                if self.device.type == 'cuda' and (now - last_gpu_check > 0.5):
+                    gpu_mem_gb = torch.cuda.max_memory_reserved() / (1024**3)
+                    last_gpu_check = now
+                    if not self.vram_warned and gpu_mem_gb > 23.0: 
+                        print(f"\n  [CAUTION] VRAM usage is critical ({gpu_mem_gb:.2f} GB).")
+                        self.vram_warned = True
+
+                # 2. Push to Logger (RAM Buffer)
+                self.logger.log_training_step(
+                    step=step,
+                    loss=loss,
+                    learning_rate=lr,
+                    wwm_improvement=wwm_imp,
+                    span_improvement=span_imp,
+                    tokens_per_sec=inst_tps,
+                    gpu_memory_gb=gpu_mem_gb,
+                    log_to_disk=False
+                )
+                
+                # 3. Terminal Console Refresh (Throttled construction & render)
+                if (now - last_dprint > 0.5) or (console_data and console_data.get('trigger_render')):
+                    # Retrieve Analytics (Thread-safe read)
+                    an_global = item.get('analytics')
+                    an_wwm = item.get('wwm_analytics')
+                    an_span = item.get('span_analytics')
+
+                    # Build Research Dashboard String (Expensive O(N) Numpy Ops happen ONLY here)
+                    dash = [
+                        f"Step: {step}/{self.config.max_steps} | Loss: {loss:.4f} | LR: {lr:.2e} | TPS: {int(inst_tps)}",
+                        f"VRAM: {gpu_mem_gb:.1f}GB | Phase: {phase}",
+                        "-" * 68,
+                        f"{'PHASE':<15} | {'STEPS':<7} | {'LOSS (EMA)':<10} | {'MIN':<6} | {'TREND':<8} | {'SNR':<4}",
+                        "-" * 68
+                    ]
+                    
+                    def add_row(name, an):
+                        if an:
+                            s = an.get_summary()
+                            if s:
+                                trend = "CLIMB" if s['slope'] > 0 else "DESCEND"
+                                if abs(s['slope']) < 1e-5: trend = "FLAT"
+                                dash.append(f"{name:<15} | {s['steps']:<7} | {s['ema']:<10.4f} | {s['min']:<6.4f} | {trend:<8} | {s['snr']:<4.2f}")
+                                return
+                        dash.append(f"{name:<15} | {'-':<7} | {'-':<10} | {'-':<6} | {'-':<8} | {'-':<4}")
+
+                    add_row("TOTAL (Global)", an_global)
+                    add_row("PH1 (Byte)", None if (self.wwm_active or self.span_active) else an_global)
+                    add_row("PH2 (WWM)", an_wwm)
+                    add_row("PH3 (Span)", an_span)
+                    
+                    dash.append("-" * 68)
+                    
+                    # TPS/ETA display
+                    tps_display = int(inst_tps)
+                    eta_display = "CALCULATING..."
+                    if self.smoothed_s_per_step:
+                         steps_remaining = self.config.max_steps - step
+                         eta_display = str(timedelta(seconds=int(steps_remaining * self.smoothed_s_per_step)))
+                    
+                    dash.append(f"[INFO]: TPS: {tps_display} | ETA: {eta_display}")
+
+                    if not self.vram_warned and gpu_mem_gb > 23.0:
+                         dash.append(f"\033[93m[WARN]: High VRAM Usage: {gpu_mem_gb:.1f} GB\033[0m")
+                    
+                    # Render
+                    self._refresh_console("\n".join(dash))
+                    last_dprint = now
+                
+                # 4. Push to Visualizer
+                # Calculate ETA roughly (or use the one from console_str if passed, but simpler to recalc)
+                steps_remaining = self.config.max_steps - step
+                eta_str = "CALCULATING..."
+                if self.smoothed_s_per_step:
+                     eta_str = str(timedelta(seconds=int(steps_remaining * self.smoothed_s_per_step)))
+
+                self.visualizer.update_status({
+                    "step": step,
+                    "max_steps": self.config.max_steps,
+                    "loss": loss,
+                    "loss_ema": loss_ema,
+                    "lr": lr,
+                    "tps": int(inst_tps),
+                    "eta": eta_str,
+                    "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+                    "vram_gb": gpu_mem_gb,
+                    "precision": self.config.precision,
+                    "wwm_imp": wwm_imp,
+                    "span_imp": span_imp,
+                    "phase": phase,
+                    "languages": lang_stats
+                })
+                
+                self.telemetry_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[WARN] Telemetry worker error: {e}")
 
     def _print_startup_banner(self):
         """Print a comprehensive high-fidelity dashboard (Wide Layout)."""
+        # Explicitly clear screen to remove any previous menus from run.py
+        import os
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         
@@ -285,19 +433,27 @@ class GenesisTrainer:
         print("\033[1m" + "="*width + "\033[0m" + "\n")
 
     def _refresh_console(self, current_info=None):
-        """Clear console and reprint banner + current info (Wide Layout)."""
-        os.system('cls' if os.name == 'nt' else 'clear')
-        self._print_startup_banner()
+        """Fast console update using ANSI escape codes (no os.system)."""
+        # \033[H - Home cursor
+        # \033[J - Clear from cursor to end of screen (prevents "ghost" text)
         
-        width = 110
-        if current_info:
-            print(f" \033[1m{current_info}\033[0m")
-        if self.last_stats_display:
-            print(self.last_stats_display)
+        # Robust Header: Always present
+        port = getattr(self.visualizer, 'port', 8080)
+        header = (
+            f"\033[1m================ GENESIS ARBITER RESEARCH DASHBOARD ================\033[0m\n"
+            f"DASHBOARD: http://localhost:{port}\n"
+            f"--------------------------------------------------------------------\n"
+        )
+        
+        content = current_info if current_info else "(No Data)"
+        # Avoid double header if the worker passes it (sanity check)
+        if "GENESIS ARBITER" in content:
+            final_str = f"\033[H\033[J{content}"
+        else:
+            final_str = f"\033[H\033[J{header}{content}"
             
-        print("\n" + "-"*width)
-        print(" [CTRL+C] to safely abort and save session log.".center(width))
-        print("-"*width + "\n")
+        sys.stdout.write(final_str + "\n")
+        sys.stdout.flush()
 
     def _stats_worker_loop(self):
         """Background thread for heavy NumPy statistics calculation."""
@@ -311,26 +467,32 @@ class GenesisTrainer:
                 
                 output_sections = []
                 
+                def format_dynamics(stats, title):
+                    lp = stats['loss_landscape']
+                    tp = stats['trend_physics_window_100']
+                    an = stats['anomalies']
+                    
+                    return (
+                        f"\n--- {title} DYNAMICS ({stats['meta']['steps']}) ---\n"
+                        f"  [LEVEL] Raw: {lp['current_raw']:.6f} | EMA: {lp['current_ema_100']:.6f} | Min: {lp['global_min']:.6f}\n"
+                        f"  [TREND] Slope: {tp['slope_regression']} | Vector: {tp['vector_direction']} | SNR: {tp['turbulence_snr']}\n"
+                        f"  [ANOMY] Spikes: {an['spike_count']} | OscFreq: {tp['oscillation_freq']}"
+                    )
+
                 # 1. Lifetime Stats
                 stats_life = LossAnalytics.calculate_from_data(data['lifetime'], progress)
                 if stats_life:
-                    sec = f"\n--- LOSS DYNAMICS: LIFETIME (Step {step}) ---\n"
-                    sec += json.dumps(stats_life, indent=2)
-                    output_sections.append(sec)
+                    output_sections.append(format_dynamics(stats_life, "LIFETIME"))
                 
                 # 2. Phase 2 Stats (only if active)
                 if data['wwm'] and data['wwm']['total_steps'] > 5:
                     stats_wwm = LossAnalytics.calculate_from_data(data['wwm'], progress)
-                    sec = f"\n--- LOSS DYNAMICS: PHASE 2 (WWM) ---\n"
-                    sec += json.dumps(stats_wwm, indent=2)
-                    output_sections.append(sec)
+                    output_sections.append(format_dynamics(stats_wwm, "PHASE 2 (WWM)"))
                     
                 # 3. Phase 3 Stats (only if active)
                 if data['span'] and data['span']['total_steps'] > 5:
                     stats_span = LossAnalytics.calculate_from_data(data['span'], progress)
-                    sec = f"\n--- LOSS DYNAMICS: PHASE 3 (SPAN) ---\n"
-                    sec += json.dumps(stats_span, indent=2)
-                    output_sections.append(sec)
+                    output_sections.append(format_dynamics(stats_span, "PHASE 3 (SPAN)"))
 
                 if output_sections:
                     self.last_stats_display = "\n".join(output_sections) + "\n" + "-" * 40
@@ -341,14 +503,25 @@ class GenesisTrainer:
             except Exception as e:
                 pass
 
-    def _train_step(self, tokens, labels, is_capture=False):
+    def _train_step(self, tokens, labels, is_capture=False, reduction='mean'):
         """Single training step (Forward + Backward + Optimizer)"""
         self.optimizer.zero_grad(set_to_none=True)
         
         # Note: grad_accum_steps is handled outside for simplicity in CUDA Graphs
+        raw_loss_vec = None
+        
         with autocast(device_type=self.device.type, dtype=self._get_dtype()):
-            outputs, loss, task_name = self.model({"tokens": tokens, "labels": labels})
-            scaled_loss = loss / self.config.grad_accum_steps
+            outputs, loss, task_name = self.model({"tokens": tokens, "labels": labels}, reduction=reduction)
+            
+            if reduction == 'none':
+                # loss is [B], we need scalar for backward
+                # (Ignore padding/masking handled inside model forward)
+                final_loss = loss.mean()
+                raw_loss_vec = loss.detach() 
+            else:
+                final_loss = loss
+            
+            scaled_loss = final_loss / self.config.grad_accum_steps
             self.scaler.scale(scaled_loss).backward()
         
         self.scaler.unscale_(self.optimizer)
@@ -359,7 +532,7 @@ class GenesisTrainer:
         # Write to static buffer for analytics/logging (recorded in graph if capturing)
         self.static_loss.copy_(scaled_loss)
         
-        return scaled_loss.detach()
+        return final_loss.detach(), raw_loss_vec
 
     def train(self):
         """Execute the training loop."""
@@ -465,12 +638,44 @@ class GenesisTrainer:
                     else:
                         # Standard Eager Step - ACCUMULATE ON GPU
                         accum_loss = torch.tensor(0.0, device=self.device)
+                        
+                        # Throttled Multilingual Telemetry
+                        monitor_langs = (self.global_step % self.config.multilingual_log_interval == 0)
+                        
                         for _ in range(self.config.grad_accum_steps):
                             try: batch = next(data_iter)
                             except StopIteration: batch = next(iter(self.train_loader))
-                            # We pass the sum to keep track without syncing yet
-                            accum_loss += self._train_step(batch['tokens'], batch['labels'])
-                        
+                            
+                            # Use reduction='none' to get per-sample loss if monitoring
+                            red_mode = 'none' if monitor_langs else 'mean'
+                            step_loss, raw_vec = self._train_step(batch['tokens'], batch['labels'], reduction=red_mode)
+                            accum_loss += step_loss
+                            
+                            # Process Language Stats
+                            if raw_vec is not None and 'locales' in batch:
+                                raw_vals = raw_vec.tolist()
+                                batch_locales = batch['locales'] # List[int]
+                                
+                                # Access loader safely
+                                loader_ref = self.train_loader.loader if hasattr(self.train_loader, 'loader') else self.train_loader
+                                lang_names = getattr(loader_ref, 'locales', [])
+                                
+                                if lang_names:
+                                    for l_id, l_vals in zip(batch_locales, raw_vals):
+                                        if l_id < len(lang_names):
+                                            ln = lang_names[l_id]
+                                            # Init or Update EMA
+                                            cur = self.lang_stats.get(ln)
+                                            if cur is None:
+                                                 self.lang_stats[ln] = {'ema': l_vals, 'steps': 1}
+                                            elif cur['ema'] is None:
+                                                 cur['ema'] = l_vals
+                                                 cur['steps'] = 1
+                                            else:
+                                                # Smooth update (alpha=0.1)
+                                                cur['ema'] = 0.9 * cur['ema'] + 0.1 * l_vals
+                                                cur['steps'] += 1
+
                         # SINGLE SYNC POINT PER FULL STEP
                         curr_loss = accum_loss.item()
                     
@@ -534,7 +739,7 @@ class GenesisTrainer:
                     eta_str = str(timedelta(seconds=int(eta_s)))
                     
                     log_line = f"Step {self.global_step}/{self.config.max_steps} | Loss: {curr_loss:.4f} | EMA: {self.loss_ema:.4f} | LR: {lr:.2e} | {tokens_per_sec:.0f} tok/s | ETA: {eta_str}"
-                    self._refresh_console(log_line)
+                    # self._refresh_console(log_line) # DISABLED: All printing handled by telemetry worker
                     
                     # --- Plateau Detection (Dynamic WWM Trigger) ---
                     if not self.wwm_active and self.global_step > self.config.wwm_trigger_steps and self.boundary_tensor is not None:
@@ -618,40 +823,77 @@ class GenesisTrainer:
                             self.last_ema_check = self.global_step
                             self.ema_at_last_check = self.loss_ema
                     # -----------------------------------------------
-
-                    # Monitor VRAM
-                    gpu_mem_gb = 0.0
-                    if self.device.type == 'cuda':
-                        gpu_mem_gb = torch.cuda.max_memory_reserved() / (1024**3)
-                        if not self.vram_warned and gpu_mem_gb > 11.4:
-                            print(f"\n  [CAUTION] VRAM usage is critical ({gpu_mem_gb:.2f} GB).")
-                            self.vram_warned = True
-
-                    current_wwm_imp = self.wwm_final_improvement if self.span_active else (
-                        (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
-                    )
-
-                    self.logger.log_training_step(
-                        step=self.global_step,
-                        loss=curr_loss,
-                        learning_rate=lr,
-                        wwm_improvement=current_wwm_imp,
-                        span_improvement=self.span_improvement,
-                        tokens_per_sec=tokens_per_sec,
-                        gpu_memory_gb=gpu_mem_gb
-                    )
-                    
                     self.logger.log_language_performance(self.global_step, self.lang_stats)
+                
+                # --- Every-Step Telemetry (Asynchronous High-Frequency) ---
+                # --- Every-Step Telemetry (Decoupled High-Frequency) ---
+                # Calculate instantaneous TPS
+                inst_time = max(time.time() - step_start, 1e-6)
+                inst_tokens = self.config.effective_batch_size * self.config.max_seq_len
+                inst_tps = inst_tokens / inst_time
+
+                # Prepare Raw Data Payload (No formatting, no GPU queries)
+                current_wwm_imp = self.wwm_final_improvement if self.span_active else (
+                    (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100 if self.ema_at_wwm and self.loss_ema else 0.0
+                )
+                
+                # Phase String Logic (String formatting is fast in Python, OK to keep or move)
+                # Moving basic logic to worker would require passing more state. Keeping simple strings here is fine.
+                loader_ref = getattr(self.train_loader, 'loader', self.train_loader)
+                m_prob = getattr(loader_ref, 'mask_prob', 0.0)
+                phase_str = "PH1 (BYTE)"
+                if self.span_active: phase_str = f"PH3 (SPAN) @ {m_prob*100:.1f}%"
+                elif self.wwm_active: phase_str = f"PH2 (WWM) @ {m_prob*100:.1f}%"
+                
+                # --- Console Logging and Interval Management (State Calculation Only) ---
+                console_data = {}
+                
+                # Update live research stats for Span/WWM
+                if self.span_active and self.ema_at_span:
+                    self.span_improvement = (self.ema_at_span - self.loss_ema) / self.ema_at_span * 100
+                elif self.wwm_active and self.ema_at_wwm:
+                     self.wwm_final_improvement = (self.ema_at_wwm - self.loss_ema) / self.ema_at_wwm * 100
+
+                if self.global_step % self.config.log_interval == 0:
+                    # Calculate Interval Metrics
+                    avg_tps = self.interval_tokens / max(self.interval_time, 1e-6)
+                    self.smoothed_s_per_step = self.interval_time / self.config.log_interval if self.smoothed_s_per_step is None else (0.9 * self.smoothed_s_per_step + 0.1 * (self.interval_time / self.config.log_interval))
+                    eta_seconds = (self.config.max_steps - self.global_step) * self.smoothed_s_per_step
+                    eta_str = str(timedelta(seconds=int(eta_seconds)))
                     
+                    # Prepare Console Data Payload
+                    console_data = {
+                        'avg_tps': avg_tps,
+                        'eta_str': eta_str,
+                        'interval_time': self.interval_time, # Pass this just in case
+                        'trigger_render': True
+                    }
+
+                    # Reset Interval Counters
                     self.interval_tokens = 0
                     self.interval_time = 0.0
-                    
-                    # Update live research stats for Span
-                    if self.span_active and self.ema_at_span:
-                        self.span_improvement = (self.ema_at_span - self.loss_ema) / self.ema_at_span * 100
 
-                # --- Asynchronous Statistics Update ---
-                if self.stats_queue.empty():
+                # FAST QUEUE PUT
+                self.telemetry_queue.put_nowait({
+                    'step': self.global_step,
+                    'max_steps': self.config.max_steps,
+                    'loss': curr_loss,
+                    'lr': lr,
+                    'inst_tps': inst_tps,
+                    'wwm_imp': current_wwm_imp,
+                    'span_imp': self.span_improvement,
+                    'phase': phase_str,
+                    'lang_stats': self.lang_stats, # reference copy
+                    'loss_ema': self.loss_ema,
+                    'console_data': console_data, # Contains interval-based triggers
+                    # Pass Analytics Objects (Thread-safe read of deque/scalars)
+                    'analytics': self.analytics,
+                    'wwm_analytics': self.wwm_analytics,
+                    'span_analytics': self.span_analytics
+                })
+
+                # --- Asynchronous Statistics Update (Throttled) ---
+                if self.global_step % self.config.log_interval == 0 and self.stats_queue.empty():
                     try:
                         progress = (self.global_step / self.config.max_steps) * 100
                         
@@ -693,14 +935,32 @@ class GenesisTrainer:
                 self.callbacks.on_batch_end(self.global_step, self.model, curr_loss)
             
             # Successful Completion
+            # Successful Completion
             self._save_session_log()
+            saved_csv = self.logger.save_loss_history()
+            saved_snap = self.visualizer.save_telemetry_snapshot()
+            print(f"  [DATA] Full loss history saved: {saved_csv}")
+            print(f"  [DATA] Final telemetry snapshot saved: {saved_snap}")
             self.logger.finalize_experiment(status="completed")
             
         except KeyboardInterrupt:
             print(f"\n\n  [SYSTEM] Safe abort triggered by user.")
             self.stats_stop_event.set()
+            self.stats_stop_event.set()
             if self.stats_queue.empty(): self.stats_queue.put(None)
+            
+            # Stop Telemetry Worker
+            self.telemetry_stop_event.set()
+            self.telemetry_queue.put(None)
+            
             self._save_session_log()
+            
+            # Save Raw Loss History on Abort
+            saved_csv = self.logger.save_loss_history()
+            saved_snap = self.visualizer.save_telemetry_snapshot()
+            print(f"  [DATA] Full loss history saved: {saved_csv}")
+            print(f"  [DATA] Final telemetry snapshot saved: {saved_snap}")
+            
             self.save_checkpoint(f"checkpoints/abort_step_{self.global_step}.pt")
             self.logger.finalize_experiment(status="aborted")
             print("  [SYSTEM] Cleanup complete. Shutdown successful.")

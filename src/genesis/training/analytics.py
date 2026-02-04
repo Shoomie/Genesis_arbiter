@@ -122,3 +122,30 @@ class LossAnalytics:
                 "last_3_spikes": [float(s) for s in data["spikes"]]
             }
         }
+
+    def get_summary(self) -> Dict:
+        """Get a compact summary for the terminal dashboard."""
+        if len(self.loss_buffer) < 2:
+            return None
+            
+        y = np.array(list(self.loss_buffer))
+        x = np.arange(len(y))
+        
+        # Linear Regression for Trend
+        A = np.vstack([x, np.ones(len(x))]).T
+        m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+        
+        # SNR
+        preds = m * x + c
+        residuals = y - preds
+        res_var = np.var(residuals)
+        total_var = np.var(y)
+        snr = res_var / (total_var + 1e-8)
+        
+        return {
+            "ema": self.ema_100 if self.ema_100 else y[-1],
+            "min": self.global_min,
+            "slope": m,
+            "snr": min(1.0, snr),
+            "steps": self.total_steps
+        }

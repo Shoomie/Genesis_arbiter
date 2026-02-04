@@ -65,6 +65,7 @@ class TrainingConfig:
     log_interval: int = 100
     val_interval: int = 500
     eval_interval: int = 1000
+    multilingual_log_interval: int = 25
     
     # Dynamic WWM Trigger
     wwm_trigger_steps: int = 5000
