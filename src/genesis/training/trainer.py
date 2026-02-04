@@ -677,7 +677,8 @@ class GenesisTrainer:
                                                 cur['steps'] += 1
 
                         # SINGLE SYNC POINT PER FULL STEP
-                        curr_loss = accum_loss.item()
+                        # Normalize loss by accumulation steps for reporting (Mean of Means)
+                        curr_loss = accum_loss.item() / self.config.grad_accum_steps
                     
                     lr = self.scheduler.step(self.global_step)
                 
