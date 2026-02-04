@@ -19,8 +19,6 @@ An experimental AI research platform investigating whether deep, specialized lan
 python run.py
 ```
 
-**Foundation:** Based on [research](docs/research/theoretical_foundations.md) exploring whether semantic density and internal consistency can substitute for dataset scale in developing logical reasoning.
-
 ---
 
 ## 🎯 Project Mission
@@ -72,12 +70,10 @@ The project uses a unified configuration system:
 ## 📚 Documentation
 
 ### Core Reading
-- **[Quick Reference](docs/reference/QUICK_REFERENCE.md)** - Project overview
 - **[Theoretical Foundations](docs/research/theoretical_foundations.md)** - Why train on scripture alone?
 
 ### Project Resources
 - **[Contributing](project_doc/CONTRIBUTING.md)** - Guidelines for research and code
-- **[Setup Guide](docs/PHASE1_SETUP.md)** - Installation and verification
 - **[Research Papers](docs/research/)** - Collection of various research done during the project
 
 ---
@@ -98,7 +94,7 @@ This research utilizes the **New World Translation of the Holy Scriptures** publ
 
 ---
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
 
 ---
 
@@ -106,7 +102,6 @@ This research utilizes the **New World Translation of the Holy Scriptures** publ
 
 - 🎮 **[Central Menu](run.py)** - Unified interface
 - ⚙️ **[Config](genesis_config.toml)** - Central settings
-- 📖 **[Quick Reference](docs/reference/QUICK_REFERENCE.md)** - Overview
 - 🔬 **[Research Docs](docs/research/)** - Technical papers
 - 🤝 **[Contributing](project_doc/CONTRIBUTING.md)** - Guidelines
 - 🙏 **[Acknowledgments](project_doc/ACKNOWLEDGMENTS.md)** - Attribution
